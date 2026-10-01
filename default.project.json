@@ -1,0 +1,23 @@
+{
+    "name": "StealthxUI",
+    "tree": {
+        "$className": "DataModel",
+        "ReplicatedStorage": {
+            "build": {
+                "$path": "build/"
+            },
+            "StealthxUI": {
+                "$path": "src/"
+            }
+        },
+        "StarterPlayer": {
+            "$className": "StarterPlayer",
+            "StarterPlayerScripts": {
+                "$className": "StarterPlayerScripts",
+                "main": {
+                    "$path": "main.client.lua"
+                }
+            }
+        }
+    }
+}
