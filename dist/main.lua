@@ -24992,9 +24992,12 @@ return v
 end
 
 function p.DisconnectAll()
-for r,u in next,p.Signals do
-local v=table.remove(p.Signals,r)
-v:Disconnect()
+for r=#p.Signals,1,-1 do
+local v=p.Signals[r]
+p.Signals[r]=nil
+if v then
+pcall(function()v:Disconnect()end)
+end
 end
 end
 
@@ -28715,154 +28718,187 @@ end
 
 return aa end function a.D()
 
-local aa={}
+local ScrollSlider = {}
 
-local ab=cloneref or clonereference or function(ab)
-return ab
+local cloneref = cloneref or clonereference or function(i)
+	return i
 end
-local ac=ab(game:GetService"UserInputService")
+local UserInputService = cloneref(game:GetService("UserInputService"))
 
-local ad=a.load'j'
-local ae=ad.New
+local Creator = a.load'j'
+local New = Creator.New
 
-function aa.New(af,ag,ah,ai,aj)
-local ak=ae("Frame",{
-Size=UDim2.new(0,ai,1,0),
-BackgroundTransparency=1,
-Position=UDim2.new(1,0,0,0),
-AnchorPoint=Vector2.new(1,0),
-Parent=ag,
-ZIndex=999,
-Active=true,
-})
+function ScrollSlider.New(ScrollingFrame, Parent, Window, Thickness, StealthxUI)
+	local Slider = New("Frame", {
+		Size = UDim2.new(0, Thickness, 1, 0),
+		BackgroundTransparency = 1,
+		Position = UDim2.new(1, 0, 0, 0),
+		AnchorPoint = Vector2.new(1, 0),
+		Parent = Parent,
+		ZIndex = 999,
+		Active = true,
+	})
 
-local al=ad.NewRoundFrame(ai/2,"Squircle",{
-Size=UDim2.new(1,0,0,0),
-ImageTransparency=0.85,
-ThemeTag={ImageColor3="Text"},
-Parent=ak,
-})
+	local Thumb = Creator.NewRoundFrame(Thickness / 2, "Squircle", {
+		Size = UDim2.new(1, 0, 0, 0),
+		ImageTransparency = 0.85,
+		ThemeTag = { ImageColor3 = "Text" },
+		Parent = Slider,
+	})
 
-local am=ae("Frame",{
-Size=UDim2.new(1,12,1,12),
-Position=UDim2.new(0.5,0,0.5,0),
-AnchorPoint=Vector2.new(0.5,0.5),
-BackgroundTransparency=1,
-Active=true,
-ZIndex=999,
-Parent=al,
-})
+	local Hitbox = New("Frame", {
+		Size = UDim2.new(1, 12, 1, 12),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundTransparency = 1,
+		Active = true,
+		ZIndex = 999,
+		Parent = Thumb,
+	})
 
-local an=ad:GenerateUniqueID()
-local ao=false
-local ap,aq
+	local ScrollSliderActionId = Creator:GenerateUniqueID()
+	local isDragging = false
+	local connectionMove, connectionEnd
+	local Connections = {}
 
-local function UpdateVisuals()
-local ar=af.AbsoluteCanvasSize.Y
-local as=af.AbsoluteWindowSize.Y
+	local function TrackConnection(Connection)
+		if Connection then
+			table.insert(Connections, Connection)
+		end
+		return Connection
+	end
 
-if ar<=as then
-al.Visible=false
-return
+	local function DisconnectDragConnections()
+		if connectionMove then
+			connectionMove:Disconnect()
+			connectionMove = nil
+		end
+		if connectionEnd then
+			connectionEnd:Disconnect()
+			connectionEnd = nil
+		end
+		isDragging = false
+	end
+
+	local function DisconnectTrackedConnections()
+		DisconnectDragConnections()
+		for Index = #Connections, 1, -1 do
+			local Connection = table.remove(Connections, Index)
+			if Connection then
+				pcall(function() Connection:Disconnect() end)
+			end
+		end
+		if StealthxUI.CurrentInput == ScrollSliderActionId then
+			StealthxUI.CurrentInput = nil
+		end
+	end
+
+	local function UpdateVisuals()
+		local canvasY = ScrollingFrame.AbsoluteCanvasSize.Y
+		local windowY = ScrollingFrame.AbsoluteWindowSize.Y
+
+		if canvasY <= windowY then
+			Thumb.Visible = false
+			return
+		end
+
+		Thumb.Visible = true
+
+		local sizeRatio = math.clamp(windowY / canvasY, 0.05, 1)
+		Thumb.Size = UDim2.new(1, 0, sizeRatio, 0)
+
+		local maxScroll = canvasY - windowY
+		local maxThumbScale = 1 - sizeRatio
+
+		if maxScroll > 0 then
+			local scrollRatio = ScrollingFrame.CanvasPosition.Y / maxScroll
+			Thumb.Position = UDim2.new(0, 0, math.clamp(scrollRatio * maxThumbScale, 0, maxThumbScale), 0)
+		else
+			Thumb.Position = UDim2.new(0, 0, 0, 0)
+		end
+	end
+
+	local function StopDrag()
+		ScrollingFrame.ScrollingEnabled = true
+		DisconnectDragConnections()
+		if StealthxUI.CurrentInput == ScrollSliderActionId then
+			StealthxUI.CurrentInput = nil
+		end
+	end
+
+	TrackConnection(Hitbox.InputBegan:Connect(function(input)
+		if
+			input.UserInputType ~= Enum.UserInputType.MouseButton1
+			and input.UserInputType ~= Enum.UserInputType.Touch
+		then
+			return
+		end
+		if isDragging then
+			return
+		end
+		if StealthxUI.CurrentInput and StealthxUI.CurrentInput ~= ScrollSliderActionId then
+			return
+		end
+
+		StealthxUI.CurrentInput = ScrollSliderActionId
+
+		isDragging = true
+		ScrollingFrame.ScrollingEnabled = false
+
+		local startY = input.Position.Y
+		local startCanvasY = ScrollingFrame.CanvasPosition.Y
+
+		connectionMove = UserInputService.InputChanged:Connect(function(moveInput)
+			if
+				moveInput.UserInputType == Enum.UserInputType.MouseMovement
+				or moveInput.UserInputType == Enum.UserInputType.Touch
+			then
+				local deltaY = moveInput.Position.Y - startY
+
+				local canvasY = ScrollingFrame.AbsoluteCanvasSize.Y
+				local windowY = ScrollingFrame.AbsoluteWindowSize.Y
+				local maxScroll = math.max(canvasY - windowY, 0)
+
+				local sliderPx = Slider.AbsoluteSize.Y
+				local thumbPx = Thumb.AbsoluteSize.Y
+				local maxThumbPx = math.max(sliderPx - thumbPx, 1)
+
+				local scrollDelta = deltaY * (maxScroll / maxThumbPx)
+
+				ScrollingFrame.CanvasPosition =
+					Vector2.new(ScrollingFrame.CanvasPosition.X, math.clamp(startCanvasY + scrollDelta, 0, maxScroll))
+			end
+		end)
+
+		connectionEnd = UserInputService.InputEnded:Connect(function(endInput)
+			if endInput.UserInputType == input.UserInputType then
+				if StealthxUI.CurrentInput and StealthxUI.CurrentInput ~= ScrollSliderActionId then
+					return
+				end
+
+				StealthxUI.CurrentInput = nil
+
+				StopDrag()
+			end
+		end)
+	end))
+
+	TrackConnection(ScrollingFrame:GetPropertyChangedSignal("AbsoluteWindowSize"):Connect(UpdateVisuals))
+	TrackConnection(ScrollingFrame:GetPropertyChangedSignal("AbsoluteCanvasSize"):Connect(UpdateVisuals))
+	TrackConnection(ScrollingFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(UpdateVisuals))
+
+	Slider.Destroying:Connect(function()
+		ScrollingFrame.ScrollingEnabled = true
+		DisconnectTrackedConnections()
+	end)
+
+	UpdateVisuals()
+
+	return Slider
 end
 
-al.Visible=true
-
-local at=math.clamp(as/ar,0.05,1)
-al.Size=UDim2.new(1,0,at,0)
-
-local au=ar-as
-local av=1-at
-
-if au>0 then
-local aw=af.CanvasPosition.Y/au
-al.Position=UDim2.new(0,0,math.clamp(aw*av,0,av),0)
-else
-al.Position=UDim2.new(0,0,0,0)
-end
-end
-
-local function StopDrag()
-if aj.CurrentInput==an then
-aj.CurrentInput=nil
-end
-ao=false
-af.ScrollingEnabled=true
-if ap then
-ap:Disconnect()
-end
-if aq then
-aq:Disconnect()
-end
-end
-
-ad.AddSignal(am.InputBegan,function(ar)
-if
-ar.UserInputType~=Enum.UserInputType.MouseButton1
-and ar.UserInputType~=Enum.UserInputType.Touch
-then
-return
-end
-if ao then
-return
-end
-if aj.CurrentInput and aj.CurrentInput~=an then
-return
-end
-
-aj.CurrentInput=an
-
-ao=true
-af.ScrollingEnabled=false
-
-local as=ar.Position.Y
-local at=af.CanvasPosition.Y
-
-ap=ac.InputChanged:Connect(function(au)
-if
-au.UserInputType==Enum.UserInputType.MouseMovement
-or au.UserInputType==Enum.UserInputType.Touch
-then
-local av=au.Position.Y-as
-
-local aw=af.AbsoluteCanvasSize.Y
-local ax=af.AbsoluteWindowSize.Y
-local ay=math.max(aw-ax,0)
-
-local az=ak.AbsoluteSize.Y
-local aA=al.AbsoluteSize.Y
-local aB=math.max(az-aA,1)
-
-local b=av*(ay/aB)
-
-af.CanvasPosition=
-Vector2.new(af.CanvasPosition.X,math.clamp(at+b,0,ay))
-end
-end)
-
-aq=ac.InputEnded:Connect(function(au)
-if au.UserInputType==ar.UserInputType then
-if aj.CurrentInput and aj.CurrentInput~=an then
-return
-end
-
-aj.CurrentInput=nil
-
-StopDrag()
-end
-end)
-end)
-
-ad.AddSignal(af:GetPropertyChangedSignal"AbsoluteWindowSize",UpdateVisuals)
-ad.AddSignal(af:GetPropertyChangedSignal"AbsoluteCanvasSize",UpdateVisuals)
-ad.AddSignal(af:GetPropertyChangedSignal"CanvasPosition",UpdateVisuals)
-
-UpdateVisuals()
-
-return ak
-end
-
-return aa end function a.E()
+return ScrollSlider
+end function a.E()
 
 local aa={}
 
@@ -35721,7 +35757,8 @@ at.Tab=ap or aa
 at.ParentType=aa.__type
 at.ParentTable=aa
 at.Index=#aa.Elements+1
-at.GlobalIndex=#ak.AllElements+1
+ak._NextElementId=(ak._NextElementId or 0)+1
+at.GlobalIndex=ak._NextElementId
 at.Parent=af
 at.Window=ak
 at.StealthxUI=al
@@ -35791,14 +35828,15 @@ end
 function av.Destroy(ax)
 aw:Destroy()
 
-table.remove(ak.AllElements,at.GlobalIndex)
+ak.AllElements[at.GlobalIndex]=nil
 table.remove(aa.Elements,at.Index)
 table.remove(ap.Elements,at.Index)
 aa:UpdateAllElementShapes(aa)
 end
 end
 
-ak.AllElements[at.Index]=av
+ak.AllElements[at.GlobalIndex]=av
+av._GlobalIndex=at.GlobalIndex
 aa.Elements[at.Index]=av
 if ap then
 ap.Elements[at.Index]=av
@@ -35841,653 +35879,890 @@ end
 end,
 }end function a.ag()
 
-local aa=(cloneref or clonereference or function(aa)
-return aa
+local cloneref = (cloneref or clonereference or function(instance)
+	return instance
 end)
 
-local af=game:GetService"Players"
+local Players = game:GetService("Players")
 
-aa(game:GetService"UserInputService")
-local ai=af.LocalPlayer:GetMouse()
+local UserInputService = cloneref(game:GetService("UserInputService"))
+local Mouse = Players.LocalPlayer:GetMouse()
 
-local ak=a.load'j'
-local al=ak.New
+local Creator = a.load'j'
+local New = Creator.New
 
-local am=a.load'H'.New
-local an=a.load'D'.New
+local CreateToolTip = a.load'H'.New
+local CreateScrollSlider = a.load'D'.New
 
+local Window, StealthxUI, UIScale
 
+local function CleanupResource(Resource, CustomCleanup)
+	if Resource == nil then
+		return
+	end
 
-local ao={
+	pcall(function()
+		if typeof(CustomCleanup) == "function" then
+			CustomCleanup(Resource)
+		elseif typeof(Resource) == "RBXScriptConnection" then
+			Resource:Disconnect()
+		elseif typeof(Resource) == "Instance" then
+			Resource:Destroy()
+		elseif type(Resource) == "thread" then
+			task.cancel(Resource)
+		elseif typeof(Resource) == "function" then
+			Resource()
+		elseif type(Resource) == "table" then
+			if typeof(Resource.Destroy) == "function" then
+				Resource:Destroy()
+			elseif typeof(Resource.Disconnect) == "function" then
+				Resource:Disconnect()
+			elseif typeof(Resource.Cancel) == "function" then
+				Resource:Cancel()
+			elseif typeof(Resource.Close) == "function" then
+				Resource:Close()
+			end
+		end
+	end)
+end
 
+local TabModule = {
+	--Window = nil,
+	--StealthxUI = nil,
+	Tabs = {},
+	Containers = {},
+	SelectedTab = nil,
+	TabCount = 0,
+	ToolTipParent = nil,
+	TabHighlight = nil,
 
-Tabs={},
-Containers={},
-SelectedTab=nil,
-TabCount=0,
-ToolTipParent=nil,
-TabHighlight=nil,
-
-OnChangeFunc=function(ao)end,
+	OnChangeFunc = function(v) end,
 }
 
-function ao.Init(ap,aq,ar,as)
-Window=ap
-StealthxUI=aq
-ao.ToolTipParent=ar
-ao.TabHighlight=as
-return ao
+function TabModule.Init(WindowTable, StealthxUITable, ToolTipParent, TabHighlight)
+	Window = WindowTable
+	StealthxUI = StealthxUITable
+	TabModule.Tabs = {}
+	TabModule.Containers = {}
+	TabModule.SelectedTab = nil
+	TabModule.TabCount = 0
+	TabModule.ToolTipParent = ToolTipParent
+	TabModule.TabHighlight = TabHighlight
+	TabModule.OnChangeFunc = function(v) end
+	return TabModule
 end
 
-function ao.New(ap,aq)
-local ar={
-__type="Tab",
-Title=ap.Title or"Tab",
-Desc=ap.Desc,
-Icon=ap.Icon,
-IconColor=ap.IconColor,
-IconShape=ap.IconShape,
-IconThemed=ap.IconThemed,
-Locked=ap.Locked,
-ShowTabTitle=ap.ShowTabTitle,
-TabTitleAlign=ap.TabTitleAlign or"Left",
-CustomEmptyPage=(ap.CustomEmptyPage and next(ap.CustomEmptyPage)~=nil)and ap.CustomEmptyPage
-or{Icon="lucide:frown",IconSize=48,Title="This tab is Empty",Desc=nil},
-Border=ap.Border,
-Selected=false,
-Index=nil,
-Parent=ap.Parent,
-UIElements={},
-Elements={},
-ContainerFrame=nil,
-UICorner=Window.UICorner-(Window.UIPadding/2),
+function TabModule.New(Config, UIScale)
+	local BuildFunction = typeof(Config.Build) == "function" and Config.Build or nil
+	local Lazy = Config.Lazy == true and BuildFunction ~= nil
 
-Gap=Window.NewElements and 1 or 6,
+	local Tab = {
+		__type = "Tab",
+		Title = Config.Title or "Tab",
+		Desc = Config.Desc,
+		Icon = Config.Icon,
+		IconColor = Config.IconColor,
+		IconShape = Config.IconShape,
+		IconThemed = Config.IconThemed,
+		Locked = Config.Locked,
+		ShowTabTitle = Config.ShowTabTitle,
+		TabTitleAlign = Config.TabTitleAlign or "Left",
+		CustomEmptyPage = (Config.CustomEmptyPage and next(Config.CustomEmptyPage) ~= nil) and Config.CustomEmptyPage
+			or { Icon = "lucide:frown", IconSize = 48, Title = "This tab is Empty", Desc = nil },
+		Border = Config.Border,
+		Selected = false,
+		Destroyed = false,
+		Index = nil,
+		Parent = Config.Parent,
+		UIElements = {},
+		Elements = {},
+		TrackedResources = {},
+		ContainerFrame = nil,
+		BuildFunction = BuildFunction,
+		Lazy = Lazy,
+		Built = BuildFunction == nil,
+		Building = false,
+		BuildFailed = false,
+		BuildError = nil,
+		BuildState = BuildFunction and "pending" or "built",
+		EmptyStateInitialized = false,
+		EmptyState = nil,
+		UICorner = Window.UICorner - (Window.UIPadding / 2),
 
-TabPaddingX=4+(Window.UIPadding/2),
-TabPaddingY=3+(Window.UIPadding/2),
-TitlePaddingY=0,
-}
+		Gap = Window.NewElements and 1 or 6,
 
+		TabPaddingX = 4 + (Window.UIPadding / 2),
+		TabPaddingY = 3 + (Window.UIPadding / 2),
+		TitlePaddingY = 0,
+	}
 
+	function Tab:Track(Resource, Cleanup)
+		if Resource == nil then
+			return nil
+		end
 
+		table.insert(Tab.TrackedResources, {
+			Resource = Resource,
+			Cleanup = Cleanup,
+		})
+		return Resource
+	end
 
+	function Tab:TrackSignal(Signal, Callback)
+		if not Signal or typeof(Signal.Connect) ~= "function" then
+			return nil
+		end
+		return Tab:Track(Signal:Connect(Callback))
+	end
 
+	function Tab:OnCleanup(Callback)
+		if typeof(Callback) ~= "function" then
+			return nil
+		end
+		return Tab:Track(Callback, function(Resource)
+			Resource()
+		end)
+	end
 
+	function Tab:Cleanup()
+		for Index = #Tab.TrackedResources, 1, -1 do
+			local Entry = table.remove(Tab.TrackedResources, Index)
+			if Entry then
+				CleanupResource(Entry.Resource, Entry.Cleanup)
+			end
+		end
+		return Tab
+	end
 
+	function Tab:_EnsureBuilt()
+		if Tab.Destroyed then
+			return false, "destroyed"
+		end
+		if Tab.Built then
+			return true
+		end
+		if Tab.Building then
+			return false, "building"
+		end
+		if Tab.BuildFailed then
+			return false, Tab.BuildError
+		end
+		if not Tab.BuildFunction then
+			Tab.Built = true
+			Tab.BuildState = "built"
+			return true
+		end
 
+		Tab.Building = true
+		Tab.BuildState = "building"
+		local Success, ErrorMessage = pcall(Tab.BuildFunction, Tab)
+		Tab.Building = false
 
-if ar.IconShape then
-ar.TabPaddingX=2+(Window.UIPadding/4)
-ar.TabPaddingY=2+(Window.UIPadding/4)
-ar.TitlePaddingY=2+(Window.UIPadding/4)
+		if not Success then
+			Tab.BuildFailed = true
+			Tab.BuildState = "failed"
+			Tab.BuildError = tostring(ErrorMessage)
+
+			-- A failed lazy build may have created a partial UI before the error.
+			-- Release those resources now instead of retaining a half-built tab.
+			Tab:Cleanup()
+			for Index = #Tab.Elements, 1, -1 do
+				local Element = Tab.Elements[Index]
+				if Element and Element.Destroy then
+					pcall(function() Element:Destroy() end)
+				end
+			end
+			Tab.Elements = {}
+
+			warn("[ StealthxUI ] Failed to build tab '" .. Tab.Title .. "': " .. Tab.BuildError)
+			return false, Tab.BuildError
+		end
+
+		Tab.Built = true
+		Tab.BuildState = "built"
+		Tab.BuildError = nil
+		return true
+	end
+
+	function Tab:Build()
+		return Tab:_EnsureBuilt()
+	end
+
+	-- if Tab.TabTitleAlign == "Left" then
+	-- 	Tab.TabTitleAlign = "Top"
+	-- elseif Tab.TabTitleAlign == "Right" then
+	-- 	Tab.TabTitleAlign = "Bottom"
+	-- elseif Tab.TabTitleAlign == "Center" then
+	-- 	Tab.TabTitleAlign = "Center"
+	-- end
+
+	if Tab.IconShape then
+		Tab.TabPaddingX = 2 + (Window.UIPadding / 4)
+		Tab.TabPaddingY = 2 + (Window.UIPadding / 4)
+		Tab.TitlePaddingY = 2 + (Window.UIPadding / 4)
+	end
+
+	if Config.Lazy == true and not BuildFunction and Window.Debug then
+		warn("[ StealthxUI ] Lazy tab '" .. Tab.Title .. "' has no Build callback; falling back to eager API usage.")
+	end
+
+	TabModule.TabCount = TabModule.TabCount + 1
+
+	local TabIndex = TabModule.TabCount
+	Tab.Index = TabIndex
+
+	Tab.UIElements.Main = Creator.NewRoundFrame(Tab.UICorner, "Squircle", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, -7, 0, 0),
+		AutomaticSize = "Y",
+		Parent = Config.Parent,
+		ThemeTag = {
+			ImageColor3 = "TabBackground",
+		},
+		ImageTransparency = 1,
+	}, {
+		Creator.NewRoundFrame(Tab.UICorner - 1, "Glass-1.4", {
+			Size = UDim2.new(1, 1, 1, 1),
+			ThemeTag = {
+				ImageColor3 = "TabBorder",
+			},
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.new(0.5, 0, 0.5, 0),
+			ImageTransparency = 1, -- .7
+			Name = "Outline",
+		}, {
+			-- New("UIGradient", {
+			--     Rotation = 80,
+			--     Color = ColorSequence.new({
+			--         ColorSequenceKeypoint.new(0.0, Color3.fromRGB(255, 255, 255)),
+			--         ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 255)),
+			--         ColorSequenceKeypoint.new(1.0, Color3.fromRGB(255, 255, 255)),
+			--     }),
+			--     Transparency = NumberSequence.new({
+			--         NumberSequenceKeypoint.new(0.0, 0.1),
+			--         NumberSequenceKeypoint.new(0.5, 1),
+			--         NumberSequenceKeypoint.new(1.0, 0.1),
+			--     })
+			-- }),
+		}),
+		Creator.NewRoundFrame(Tab.UICorner, "Squircle", {
+			Size = UDim2.new(1, 0, 0, 0),
+			AutomaticSize = "Y",
+			ThemeTag = {
+				ImageColor3 = "Text",
+			},
+			ImageTransparency = 1, -- .95
+			Name = "Frame",
+		}, {
+			New("UIListLayout", {
+				SortOrder = "LayoutOrder",
+				Padding = UDim.new(0, 2 + (Window.UIPadding / 2)),
+				FillDirection = "Horizontal",
+				VerticalAlignment = "Center",
+			}),
+			New("TextLabel", {
+				Text = Tab.Title,
+				ThemeTag = {
+					TextColor3 = "TabTitle",
+				},
+				TextTransparency = not Tab.Locked and 0.4 or 0.7,
+				TextSize = 15,
+				Size = UDim2.new(1, 0, 0, 0),
+				FontFace = Font.new(Creator.Font, Enum.FontWeight.Medium),
+				TextWrapped = true,
+				RichText = true,
+				AutomaticSize = "Y",
+				LayoutOrder = 2,
+				TextXAlignment = "Left",
+				BackgroundTransparency = 1,
+			}, {
+				New("UIPadding", {
+					PaddingTop = UDim.new(0, Tab.TitlePaddingY),
+					--PaddingLeft = UDim.new(0,2+(Window.UIPadding/2)),
+					--PaddingRight = UDim.new(0,2+(Window.UIPadding/2)),
+					PaddingBottom = UDim.new(0, Tab.TitlePaddingY),
+				}),
+			}),
+			New("UIPadding", {
+				PaddingTop = UDim.new(0, Tab.TabPaddingY),
+				PaddingLeft = UDim.new(0, Tab.TabPaddingX),
+				PaddingRight = UDim.new(0, Tab.TabPaddingX),
+				PaddingBottom = UDim.new(0, Tab.TabPaddingY),
+			}),
+		}),
+	}, true)
+
+	local TextOffset = 0
+	local Icon
+	local Icon2
+
+	if Tab.Icon then
+		Icon = Creator.Image(
+			Tab.Icon,
+			Tab.Icon .. ":" .. Tab.Title,
+			0,
+			Window.Folder,
+			Tab.__type,
+			Tab.IconColor and false or true,
+			Tab.IconThemed,
+			"TabIcon"
+		)
+		Icon.Size = UDim2.new(0, 16, 0, 16)
+		if Tab.IconColor then
+			Icon.ImageLabel.ImageColor3 = Tab.IconColor
+		end
+		if not Tab.IconShape then
+			Icon.Parent = Tab.UIElements.Main.Frame
+			Tab.UIElements.Icon = Icon
+			Icon.ImageLabel.ImageTransparency = not Tab.Locked and 0 or 0.7
+			TextOffset = -16 - 2 - (Window.UIPadding / 2)
+			Tab.UIElements.Main.Frame.TextLabel.Size = UDim2.new(1, TextOffset, 0, 0)
+		elseif Tab.IconColor then
+			local _IconBG = Creator.NewRoundFrame(
+				Tab.IconShape ~= "Circle" and (Tab.UICorner + 5 - (2 + (Window.UIPadding / 4))) or 9999,
+				"Squircle",
+				{
+					Size = UDim2.new(0, 26, 0, 26),
+					ImageColor3 = Tab.IconColor,
+					Parent = Tab.UIElements.Main.Frame,
+				},
+				{
+					Icon,
+					Creator.NewRoundFrame(
+						Tab.IconShape ~= "Circle" and (Tab.UICorner + 5 - (2 + (Window.UIPadding / 4))) or 9999,
+						"Glass-1.4",
+						{
+							Size = UDim2.new(1, 0, 1, 0),
+							ThemeTag = {
+								ImageColor3 = "White",
+							},
+							ImageTransparency = 0,
+							Name = "Outline",
+						},
+						{
+							-- New("UIGradient", {
+							--     Rotation = 45,
+							--     Color = ColorSequence.new({
+							--         ColorSequenceKeypoint.new(0.0, Color3.fromRGB(255, 255, 255)),
+							--         ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 255)),
+							--         ColorSequenceKeypoint.new(1.0, Color3.fromRGB(255, 255, 255)),
+							--     }),
+							--     Transparency = NumberSequence.new({
+							--         NumberSequenceKeypoint.new(0.0, 0.1),
+							--         NumberSequenceKeypoint.new(0.5, 1),
+							--         NumberSequenceKeypoint.new(1.0, 0.1),
+							--     })
+							-- }),
+						}
+					),
+				}
+			)
+			Icon.AnchorPoint = Vector2.new(0.5, 0.5)
+			Icon.Position = UDim2.new(0.5, 0, 0.5, 0)
+			Icon.ImageLabel.ImageTransparency = 0
+			Icon.ImageLabel.ImageColor3 = Creator.GetTextColorForHSB(Tab.IconColor, 0.68)
+			TextOffset = -26 - 2 - (Window.UIPadding / 2)
+			Tab.UIElements.Main.Frame.TextLabel.Size = UDim2.new(1, TextOffset, 0, 0)
+		end
+
+		Icon2 =
+			Creator.Image(Tab.Icon, Tab.Icon .. ":" .. Tab.Title, 0, Window.Folder, Tab.__type, true, Tab.IconThemed)
+		Icon2.Size = UDim2.new(0, 16, 0, 16)
+		Icon2.ImageLabel.ImageTransparency = not Tab.Locked and 0 or 0.7
+		TextOffset = -30
+
+		--Icon2.Parent = Tab.UIElements.Main.Frame
+		--Tab.UIElements.Main.Frame.TextLabel.Size = UDim2.new(1,-30,0,0)
+		--Tab.UIElements.Icon = Icon
+	end
+
+	Tab.UIElements.ContainerFrame = New("ScrollingFrame", {
+		Size = UDim2.new(1, 0, 1, Tab.ShowTabTitle and -((Window.UIPadding * 2.4) + 12) or 0),
+		BackgroundTransparency = 1,
+		ScrollBarThickness = 0,
+		ElasticBehavior = "Never",
+		CanvasSize = UDim2.new(0, 0, 0, 0),
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 0, 1, 0),
+		AutomaticCanvasSize = "Y",
+		--Visible = false,
+		ScrollingDirection = "Y",
+	}, {
+		New("UIPadding", {
+			PaddingTop = UDim.new(0, not Window.HidePanelBackground and 20 or 10),
+			PaddingLeft = UDim.new(0, not Window.HidePanelBackground and 20 or 10),
+			PaddingRight = UDim.new(0, not Window.HidePanelBackground and 20 or 10),
+			PaddingBottom = UDim.new(0, not Window.HidePanelBackground and 20 or 10),
+		}),
+		New("UIListLayout", {
+			SortOrder = "LayoutOrder",
+			Padding = UDim.new(0, Tab.Gap),
+			HorizontalAlignment = "Center",
+		}),
+	})
+
+	-- Tab.UIElements.ContainerFrame.UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+	--     Tab.UIElements.ContainerFrame.CanvasSize = UDim2.new(0,0,0,Tab.UIElements.ContainerFrame.UIListLayout.AbsoluteContentSize.Y+Window.UIPadding*2)
+	-- end)
+
+	Tab.UIElements.ContainerFrameCanvas = New("Frame", {
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		Visible = false,
+		Parent = Window.UIElements.MainBar,
+		ZIndex = 5,
+	}, {
+		Tab.UIElements.ContainerFrame,
+		New("Frame", {
+			Size = UDim2.new(1, -14, 1, -14),
+			Position = UDim2.new(0.5, 0, 0.5, 0),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundTransparency = 1,
+			Name = "ScrollSliderHolder",
+		}),
+		New("Frame", {
+			Size = UDim2.new(1, 0, 0, ((Window.UIPadding * 2.4) + 12)),
+			BackgroundTransparency = 1,
+			Visible = Tab.ShowTabTitle or false,
+			Name = "TabTitle",
+		}, {
+			Icon2,
+			New("TextLabel", {
+				Text = Tab.Title,
+				ThemeTag = {
+					TextColor3 = "Text",
+				},
+				TextSize = 20,
+				TextTransparency = 0.1,
+				Size = UDim2.new(0, 0, 1, 0),
+				FontFace = Font.new(Creator.Font, Enum.FontWeight.SemiBold),
+				--TextTruncate = "AtEnd",
+				RichText = true,
+				LayoutOrder = 2,
+				TextXAlignment = "Left",
+				BackgroundTransparency = 1,
+				AutomaticSize = "X",
+			}),
+			New("UIPadding", {
+				PaddingTop = UDim.new(0, 20),
+				PaddingLeft = UDim.new(0, 20),
+				PaddingRight = UDim.new(0, 20),
+				PaddingBottom = UDim.new(0, 20),
+			}),
+			New("UIListLayout", {
+				SortOrder = "LayoutOrder",
+				Padding = UDim.new(0, 10),
+				FillDirection = "Horizontal",
+				VerticalAlignment = "Center",
+				HorizontalAlignment = Tab.TabTitleAlign,
+			}),
+		}),
+		New("Frame", {
+			Size = UDim2.new(1, 0, 0, 1),
+			BackgroundTransparency = 0.9,
+			ThemeTag = {
+				BackgroundColor3 = "Text",
+			},
+			Position = UDim2.new(0, 0, 0, ((Window.UIPadding * 2.4) + 12)),
+			Visible = Tab.ShowTabTitle or false,
+		}),
+	})
+
+	TabModule.Containers[TabIndex] = Tab.UIElements.ContainerFrameCanvas
+	TabModule.Tabs[TabIndex] = Tab
+
+	Tab.ContainerFrame = Tab.UIElements.ContainerFrameCanvas
+
+	Tab:TrackSignal(Tab.UIElements.Main.MouseButton1Click, function()
+		if not Tab.Locked then
+			TabModule:SelectTab(TabIndex)
+		end
+	end)
+
+	if Window.ScrollBarEnabled then
+		CreateScrollSlider(
+			Tab.UIElements.ContainerFrame,
+			Tab.UIElements.ContainerFrameCanvas.ScrollSliderHolder,
+			Window,
+			4,
+			StealthxUI
+		)
+	end
+
+	local ToolTip
+	local hoverTimer
+	local MouseConn
+	local IsHovering = false
+
+	-- ToolTip
+	if Tab.Desc then
+		Tab:TrackSignal(Tab.UIElements.Main.InputBegan, function()
+			IsHovering = true
+			hoverTimer = task.spawn(function()
+				task.wait(0.35)
+				if IsHovering and not ToolTip then
+					ToolTip = CreateToolTip(Tab.Desc, TabModule.ToolTipParent, true)
+					ToolTip.Container.AnchorPoint = Vector2.new(0.5, 0.5)
+
+					local function updatePosition()
+						if ToolTip then
+							ToolTip.Container.Position = UDim2.new(0, Mouse.X, 0, Mouse.Y - 4)
+						end
+					end
+
+					updatePosition()
+					MouseConn = Mouse.Move:Connect(updatePosition)
+					Tab._TooltipMouseConn = MouseConn
+					ToolTip:Open()
+				end
+			end)
+		end)
+	end
+
+	Tab:TrackSignal(Tab.UIElements.Main.MouseEnter, function()
+		if not Tab.Locked then
+			Creator.SetThemeTag(Tab.UIElements.Main.Frame, {
+				ImageTransparency = "TabBackgroundHoverTransparency",
+				ImageColor3 = "TabBackgroundHover",
+			}, 0.1)
+		end
+	end)
+	Tab:TrackSignal(Tab.UIElements.Main.InputEnded, function()
+		if Tab.Desc then
+			IsHovering = false
+			if hoverTimer then
+				task.cancel(hoverTimer)
+				hoverTimer = nil
+			end
+			if MouseConn then
+				MouseConn:Disconnect()
+				MouseConn = nil
+			end
+			if ToolTip then
+				ToolTip:Close()
+				ToolTip = nil
+			end
+		end
+
+		if not Tab.Locked then
+			Creator.SetThemeTag(Tab.UIElements.Main.Frame, {
+				ImageTransparency = "TabBorderTransparency",
+			}, 0.1)
+		end
+	end)
+
+	function Tab:ScrollToTheElement(elemindex)
+		if not Tab.Built then
+			Tab:_EnsureBuilt()
+		end
+
+		local Target = Tab.Elements[elemindex]
+		if not Target or not Target.ElementFrame then
+			return Tab
+		end
+
+		Tab.UIElements.ContainerFrame.ScrollingEnabled = false
+
+		Creator.Tween(Tab.UIElements.ContainerFrame, 0.45, {
+			CanvasPosition = Vector2.new(
+				0,
+				Target.ElementFrame.AbsolutePosition.Y
+					- Tab.UIElements.ContainerFrame.AbsolutePosition.Y
+					- Tab.UIElements.ContainerFrame.UIPadding.PaddingTop.Offset
+			),
+		}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out):Play()
+
+		task.spawn(function()
+			task.wait(0.48)
+
+			if Target.Highlight then
+				Target:Highlight()
+			end
+			Tab.UIElements.ContainerFrame.ScrollingEnabled = true
+		end)
+
+		return Tab
+	end
+
+	-- yo
+
+	local ElementsModule = a.load'af'
+
+	ElementsModule.Load(
+		Tab,
+		Tab.UIElements.ContainerFrame,
+		ElementsModule.Elements,
+		Window,
+		StealthxUI,
+		nil,
+		ElementsModule,
+		UIScale,
+		Tab
+	)
+
+	if Tab.BuildFunction and not Tab.Lazy then
+		Tab:_EnsureBuilt()
+	end
+
+	function Tab:GetElement(Id)
+		local Element = Window.GetElement and Window:GetElement(Id) or nil
+		if Element and Element.Tab == Tab then
+			return Element
+		end
+		return nil
+	end
+
+	function Tab:_EnsureEmptyState()
+		if Tab.Destroyed or Tab.EmptyStateInitialized or #Tab.Elements > 0 then
+			return Tab.EmptyState
+		end
+
+		Tab.EmptyStateInitialized = true
+		local EmptyPageIcon
+		if Tab.CustomEmptyPage.Icon then
+			EmptyPageIcon = Creator.Image(Tab.CustomEmptyPage.Icon, Tab.CustomEmptyPage.Icon, 0, "Temp", "EmptyPage", true)
+			EmptyPageIcon.Size = UDim2.fromOffset(Tab.CustomEmptyPage.IconSize or 48, Tab.CustomEmptyPage.IconSize or 48)
+		end
+
+		local Empty = New("Frame", {
+			BackgroundTransparency = 1,
+			Size = UDim2.new(1, 0, 1, -Window.UIElements.Main.Main.Topbar.AbsoluteSize.Y),
+			Parent = Tab.UIElements.ContainerFrame,
+		}, {
+			New("UIListLayout", {
+				Padding = UDim.new(0, 8),
+				SortOrder = "LayoutOrder",
+				VerticalAlignment = "Center",
+				HorizontalAlignment = "Center",
+				FillDirection = "Vertical",
+			}),
+			EmptyPageIcon,
+			Tab.CustomEmptyPage.Title and New("TextLabel", {
+				AutomaticSize = "XY",
+				Text = Tab.CustomEmptyPage.Title,
+				ThemeTag = { TextColor3 = "Text" },
+				TextSize = 18,
+				TextTransparency = 0.5,
+				BackgroundTransparency = 1,
+				FontFace = Font.new(Creator.Font, Enum.FontWeight.Medium),
+			}) or nil,
+			Tab.CustomEmptyPage.Desc and New("TextLabel", {
+				AutomaticSize = "XY",
+				Text = Tab.CustomEmptyPage.Desc,
+				ThemeTag = { TextColor3 = "Text" },
+				TextSize = 15,
+				TextTransparency = 0.65,
+				BackgroundTransparency = 1,
+				FontFace = Font.new(Creator.Font, Enum.FontWeight.Regular),
+			}) or nil,
+		})
+
+		Tab.EmptyState = Empty
+		local CreationConn
+		CreationConn = Tab:TrackSignal(Tab.UIElements.ContainerFrame.ChildAdded, function()
+			if Empty.Parent then
+				Empty.Visible = false
+			end
+			if CreationConn then
+				CreationConn:Disconnect()
+				CreationConn = nil
+			end
+		end)
+		return Empty
+	end
+
+	function Tab:LockAll()
+		--print("LockAll called, number of elements: " .. #self.Elements)
+		for _, element in next, Window.AllElements do
+			if element.Tab and element.Tab.Index and element.Tab.Index == Tab.Index and element.Lock then
+				element:Lock()
+			end
+		end
+	end
+	function Tab:UnlockAll()
+		for _, element in next, Window.AllElements do
+			if element.Tab and element.Tab.Index and element.Tab.Index == Tab.Index and element.Unlock then
+				element:Unlock()
+			end
+		end
+	end
+	function Tab:GetLocked()
+		local LockedElements = {}
+
+		for _, element in next, Window.AllElements do
+			if element.Tab and element.Tab.Index and element.Tab.Index == Tab.Index and element.Locked == true then
+				table.insert(LockedElements, element)
+			end
+		end
+
+		return LockedElements
+	end
+	function Tab:GetUnlocked()
+		local UnlockedElements = {}
+
+		for _, element in next, Window.AllElements do
+			if element.Tab and element.Tab.Index and element.Tab.Index == Tab.Index and element.Locked == false then
+				table.insert(UnlockedElements, element)
+			end
+		end
+
+		return UnlockedElements
+	end
+
+	function Tab:Select()
+		return TabModule:SelectTab(Tab.Index)
+	end
+
+	function Tab:Destroy(SuppressSelect)
+		if Tab.Destroyed then
+			return Tab
+		end
+
+		Tab.Destroyed = true
+		if Tab._TooltipMouseConn then
+			CleanupResource(Tab._TooltipMouseConn)
+			Tab._TooltipMouseConn = nil
+		end
+		Tab:Cleanup()
+
+		for Index = #Tab.Elements, 1, -1 do
+			local Element = Tab.Elements[Index]
+			if Element and Element.Destroy then
+				pcall(function() Element:Destroy() end)
+			end
+		end
+		Tab.Elements = {}
+
+		if Tab.UIElements.ContainerFrameCanvas then
+			Tab.UIElements.ContainerFrameCanvas:Destroy()
+		end
+		if Tab.UIElements.Main then
+			Tab.UIElements.Main:Destroy()
+		end
+
+		local TabIndex = Tab.Index
+		TabModule.Tabs[TabIndex] = nil
+		TabModule.Containers[TabIndex] = nil
+
+		if not SuppressSelect and TabModule.SelectedTab == TabIndex then
+			TabModule.SelectedTab = nil
+			for Index, Candidate in next, TabModule.Tabs do
+				if Candidate and not Candidate.Destroyed and not Candidate.Locked then
+					TabModule:SelectTab(Index)
+					break
+				end
+			end
+		end
+
+		return Tab
+	end
+
+	return Tab
 end
 
-ao.TabCount=ao.TabCount+1
-
-local as=ao.TabCount
-ar.Index=as
-
-ar.UIElements.Main=ak.NewRoundFrame(ar.UICorner,"Squircle",{
-BackgroundTransparency=1,
-Size=UDim2.new(1,-7,0,0),
-AutomaticSize="Y",
-Parent=ap.Parent,
-ThemeTag={
-ImageColor3="TabBackground",
-},
-ImageTransparency=1,
-},{
-ak.NewRoundFrame(ar.UICorner-1,"Glass-1.4",{
-Size=UDim2.new(1,1,1,1),
-ThemeTag={
-ImageColor3="TabBorder",
-},
-AnchorPoint=Vector2.new(0.5,0.5),
-Position=UDim2.new(0.5,0,0.5,0),
-ImageTransparency=1,
-Name="Outline",
-},{
-
-
-
-
-
-
-
-
-
-
-
-
-
-}),
-ak.NewRoundFrame(ar.UICorner,"Squircle",{
-Size=UDim2.new(1,0,0,0),
-AutomaticSize="Y",
-ThemeTag={
-ImageColor3="Text",
-},
-ImageTransparency=1,
-Name="Frame",
-},{
-al("UIListLayout",{
-SortOrder="LayoutOrder",
-Padding=UDim.new(0,2+(Window.UIPadding/2)),
-FillDirection="Horizontal",
-VerticalAlignment="Center",
-}),
-al("TextLabel",{
-Text=ar.Title,
-ThemeTag={
-TextColor3="TabTitle",
-},
-TextTransparency=not ar.Locked and 0.4 or 0.7,
-TextSize=15,
-Size=UDim2.new(1,0,0,0),
-FontFace=Font.new(ak.Font,Enum.FontWeight.Medium),
-TextWrapped=true,
-RichText=true,
-AutomaticSize="Y",
-LayoutOrder=2,
-TextXAlignment="Left",
-BackgroundTransparency=1,
-},{
-al("UIPadding",{
-PaddingTop=UDim.new(0,ar.TitlePaddingY),
-
-
-PaddingBottom=UDim.new(0,ar.TitlePaddingY),
-}),
-}),
-al("UIPadding",{
-PaddingTop=UDim.new(0,ar.TabPaddingY),
-PaddingLeft=UDim.new(0,ar.TabPaddingX),
-PaddingRight=UDim.new(0,ar.TabPaddingX),
-PaddingBottom=UDim.new(0,ar.TabPaddingY),
-}),
-}),
-},true)
-
-local at=0
-local au
-local av
-
-if ar.Icon then
-au=ak.Image(
-ar.Icon,
-ar.Icon..":"..ar.Title,
-0,
-Window.Folder,
-ar.__type,
-ar.IconColor and false or true,
-ar.IconThemed,
-"TabIcon"
-)
-au.Size=UDim2.new(0,16,0,16)
-if ar.IconColor then
-au.ImageLabel.ImageColor3=ar.IconColor
-end
-if not ar.IconShape then
-au.Parent=ar.UIElements.Main.Frame
-ar.UIElements.Icon=au
-au.ImageLabel.ImageTransparency=not ar.Locked and 0 or 0.7
-at=-18-(Window.UIPadding/2)
-ar.UIElements.Main.Frame.TextLabel.Size=UDim2.new(1,at,0,0)
-elseif ar.IconColor then
-ak.NewRoundFrame(
-ar.IconShape~="Circle"and(ar.UICorner+5-(2+(Window.UIPadding/4)))or 9999,
-"Squircle",
-{
-Size=UDim2.new(0,26,0,26),
-ImageColor3=ar.IconColor,
-Parent=ar.UIElements.Main.Frame,
-},
-{
-au,
-ak.NewRoundFrame(
-ar.IconShape~="Circle"and(ar.UICorner+5-(2+(Window.UIPadding/4)))or 9999,
-"Glass-1.4",
-{
-Size=UDim2.new(1,0,1,0),
-ThemeTag={
-ImageColor3="White",
-},
-ImageTransparency=0,
-Name="Outline",
-},
-{
-
-
-
-
-
-
-
-
-
-
-
-
-
-}
-),
-}
-)
-au.AnchorPoint=Vector2.new(0.5,0.5)
-au.Position=UDim2.new(0.5,0,0.5,0)
-au.ImageLabel.ImageTransparency=0
-au.ImageLabel.ImageColor3=ak.GetTextColorForHSB(ar.IconColor,0.68)
-at=-28-(Window.UIPadding/2)
-ar.UIElements.Main.Frame.TextLabel.Size=UDim2.new(1,at,0,0)
+function TabModule:OnChange(func)
+	TabModule.OnChangeFunc = func
 end
 
-av=
-ak.Image(ar.Icon,ar.Icon..":"..ar.Title,0,Window.Folder,ar.__type,true,ar.IconThemed)
-av.Size=UDim2.new(0,16,0,16)
-av.ImageLabel.ImageTransparency=not ar.Locked and 0 or 0.7
-at=-30
+function TabModule:SelectTab(TabIndex)
+	local SelectedTab = TabModule.Tabs[TabIndex]
+	if not SelectedTab or SelectedTab.Destroyed or SelectedTab.Locked then
+		return nil
+	end
 
+	local AlreadySelected = TabModule.SelectedTab == TabIndex and SelectedTab.Built
+	local BuiltSuccessfully = true
+	if not SelectedTab.Built then
+		BuiltSuccessfully = SelectedTab:_EnsureBuilt()
+	end
+	if SelectedTab.BuildFailed then
+		BuiltSuccessfully = false
+	end
 
+	TabModule.SelectedTab = TabIndex
 
+	for _, TabObject in next, TabModule.Tabs do
+		if TabObject and not TabObject.Destroyed and not TabObject.Locked then
+			Creator.SetThemeTag(TabObject.UIElements.Main, { ImageTransparency = "TabBorderTransparency" }, 0.15)
+			if TabObject.Border then
+				Creator.SetThemeTag(TabObject.UIElements.Main.Outline, { ImageTransparency = "TabBorderTransparency" }, 0.15)
+			end
+			Creator.SetThemeTag(TabObject.UIElements.Main.Frame.TextLabel, { TextTransparency = "TabTextTransparency" }, 0.15)
+			if TabObject.UIElements.Icon and not TabObject.IconColor then
+				Creator.SetThemeTag(TabObject.UIElements.Icon.ImageLabel, { ImageTransparency = "TabIconTransparency" }, 0.15)
+			end
+			TabObject.Selected = false
+		end
+	end
 
+	Creator.SetThemeTag(SelectedTab.UIElements.Main, {
+		ImageColor3 = "TabBackgroundActive",
+		ImageTransparency = "TabBackgroundActiveTransparency",
+	}, 0.15)
+	if SelectedTab.Border then
+		Creator.SetThemeTag(SelectedTab.UIElements.Main.Outline, { ImageTransparency = "TabBorderTransparencyActive" }, 0.15)
+	end
+	Creator.SetThemeTag(SelectedTab.UIElements.Main.Frame.TextLabel, { TextTransparency = "TabTextTransparencyActive" }, 0.15)
+	if SelectedTab.UIElements.Icon and not SelectedTab.IconColor then
+		Creator.SetThemeTag(SelectedTab.UIElements.Icon.ImageLabel, { ImageTransparency = "TabIconTransparencyActive" }, 0.15)
+	end
+	SelectedTab.Selected = true
+
+	if not AlreadySelected then
+		for _, ContainerObject in next, TabModule.Containers do
+			if ContainerObject then
+				ContainerObject.AnchorPoint = Vector2.new(0, 0.05)
+				ContainerObject.Visible = false
+			end
+		end
+
+		local Container = TabModule.Containers[TabIndex]
+		if Container then
+			Container.Visible = true
+			local TweenService = game:GetService("TweenService")
+			TweenService:Create(
+				Container,
+				TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+				{ AnchorPoint = Vector2.new(0, 0) }
+			):Play()
+		end
+	end
+
+	if #SelectedTab.Elements == 0 then
+		SelectedTab:_EnsureEmptyState()
+	elseif SelectedTab.EmptyState then
+		SelectedTab.EmptyState.Visible = false
+	end
+
+	if not BuiltSuccessfully and SelectedTab.BuildError and Window.Debug then
+		warn("[ StealthxUI: DEBUG Mode ] Tab '" .. SelectedTab.Title .. "' is using a partial/failed build: " .. SelectedTab.BuildError)
+	end
+
+	TabModule.OnChangeFunc(TabIndex)
+	return SelectedTab
 end
 
-ar.UIElements.ContainerFrame=al("ScrollingFrame",{
-Size=UDim2.new(1,0,1,ar.ShowTabTitle and-((Window.UIPadding*2.4)+12)or 0),
-BackgroundTransparency=1,
-ScrollBarThickness=0,
-ElasticBehavior="Never",
-CanvasSize=UDim2.new(0,0,0,0),
-AnchorPoint=Vector2.new(0,1),
-Position=UDim2.new(0,0,1,0),
-AutomaticCanvasSize="Y",
+function TabModule:DestroyAll()
+	local Tabs = {}
+	for _, Tab in next, TabModule.Tabs do
+		table.insert(Tabs, Tab)
+	end
 
-ScrollingDirection="Y",
-},{
-al("UIPadding",{
-PaddingTop=UDim.new(0,not Window.HidePanelBackground and 20 or 10),
-PaddingLeft=UDim.new(0,not Window.HidePanelBackground and 20 or 10),
-PaddingRight=UDim.new(0,not Window.HidePanelBackground and 20 or 10),
-PaddingBottom=UDim.new(0,not Window.HidePanelBackground and 20 or 10),
-}),
-al("UIListLayout",{
-SortOrder="LayoutOrder",
-Padding=UDim.new(0,ar.Gap),
-HorizontalAlignment="Center",
-}),
-})
+	for Index = #Tabs, 1, -1 do
+		local Tab = Tabs[Index]
+		if Tab and Tab.Destroy then
+			Tab:Destroy(true)
+		end
+	end
 
-
-
-
-
-ar.UIElements.ContainerFrameCanvas=al("Frame",{
-Size=UDim2.new(1,0,1,0),
-BackgroundTransparency=1,
-Visible=false,
-Parent=Window.UIElements.MainBar,
-ZIndex=5,
-},{
-ar.UIElements.ContainerFrame,
-al("Frame",{
-Size=UDim2.new(1,-14,1,-14),
-Position=UDim2.new(0.5,0,0.5,0),
-AnchorPoint=Vector2.new(0.5,0.5),
-BackgroundTransparency=1,
-Name="ScrollSliderHolder",
-}),
-al("Frame",{
-Size=UDim2.new(1,0,0,((Window.UIPadding*2.4)+12)),
-BackgroundTransparency=1,
-Visible=ar.ShowTabTitle or false,
-Name="TabTitle",
-},{
-av,
-al("TextLabel",{
-Text=ar.Title,
-ThemeTag={
-TextColor3="Text",
-},
-TextSize=20,
-TextTransparency=0.1,
-Size=UDim2.new(0,0,1,0),
-FontFace=Font.new(ak.Font,Enum.FontWeight.SemiBold),
-
-RichText=true,
-LayoutOrder=2,
-TextXAlignment="Left",
-BackgroundTransparency=1,
-AutomaticSize="X",
-}),
-al("UIPadding",{
-PaddingTop=UDim.new(0,20),
-PaddingLeft=UDim.new(0,20),
-PaddingRight=UDim.new(0,20),
-PaddingBottom=UDim.new(0,20),
-}),
-al("UIListLayout",{
-SortOrder="LayoutOrder",
-Padding=UDim.new(0,10),
-FillDirection="Horizontal",
-VerticalAlignment="Center",
-HorizontalAlignment=ar.TabTitleAlign,
-}),
-}),
-al("Frame",{
-Size=UDim2.new(1,0,0,1),
-BackgroundTransparency=0.9,
-ThemeTag={
-BackgroundColor3="Text",
-},
-Position=UDim2.new(0,0,0,((Window.UIPadding*2.4)+12)),
-Visible=ar.ShowTabTitle or false,
-}),
-})
-
-ao.Containers[as]=ar.UIElements.ContainerFrameCanvas
-ao.Tabs[as]=ar
-
-ar.ContainerFrame=ar.UIElements.ContainerFrameCanvas
-
-ak.AddSignal(ar.UIElements.Main.MouseButton1Click,function()
-if not ar.Locked then
-ao:SelectTab(as)
-end
-end)
-
-if Window.ScrollBarEnabled then
-an(
-ar.UIElements.ContainerFrame,
-ar.UIElements.ContainerFrameCanvas.ScrollSliderHolder,
-Window,
-4,
-StealthxUI
-)
+	TabModule.Tabs = {}
+	TabModule.Containers = {}
+	TabModule.SelectedTab = nil
+	TabModule.TabCount = 0
 end
 
-local aw
-local ax
-local ay
-local az=false
-
-
-if ar.Desc then
-ak.AddSignal(ar.UIElements.Main.InputBegan,function()
-az=true
-ax=task.spawn(function()
-task.wait(0.35)
-if az and not aw then
-aw=am(ar.Desc,ao.ToolTipParent,true)
-aw.Container.AnchorPoint=Vector2.new(0.5,0.5)
-
-local function updatePosition()
-if aw then
-aw.Container.Position=UDim2.new(0,ai.X,0,ai.Y-4)
-end
-end
-
-updatePosition()
-ay=ai.Move:Connect(updatePosition)
-aw:Open()
-end
-end)
-end)
-end
-
-ak.AddSignal(ar.UIElements.Main.MouseEnter,function()
-if not ar.Locked then
-ak.SetThemeTag(ar.UIElements.Main.Frame,{
-ImageTransparency="TabBackgroundHoverTransparency",
-ImageColor3="TabBackgroundHover",
-},0.1)
-end
-end)
-ak.AddSignal(ar.UIElements.Main.InputEnded,function()
-if ar.Desc then
-az=false
-if ax then
-task.cancel(ax)
-ax=nil
-end
-if ay then
-ay:Disconnect()
-ay=nil
-end
-if aw then
-aw:Close()
-aw=nil
-end
-end
-
-if not ar.Locked then
-ak.SetThemeTag(ar.UIElements.Main.Frame,{
-ImageTransparency="TabBorderTransparency",
-},0.1)
-end
-end)
-
-function ar.ScrollToTheElement(aA,aB)
-ar.UIElements.ContainerFrame.ScrollingEnabled=false
-
-ak.Tween(ar.UIElements.ContainerFrame,0.45,{
-CanvasPosition=Vector2.new(
-0,
-ar.Elements[aB].ElementFrame.AbsolutePosition.Y
--ar.UIElements.ContainerFrame.AbsolutePosition.Y
--ar.UIElements.ContainerFrame.UIPadding.PaddingTop.Offset
-),
-},Enum.EasingStyle.Quint,Enum.EasingDirection.Out):Play()
-
-task.spawn(function()
-task.wait(0.48)
-
-if ar.Elements[aB].Highlight then
-ar.Elements[aB]:Highlight()
-end
-ar.UIElements.ContainerFrame.ScrollingEnabled=true
-end)
-
-return ar
-end
-
-
-
-local aA=a.load'af'
-
-aA.Load(
-ar,
-ar.UIElements.ContainerFrame,
-aA.Elements,
-Window,
-StealthxUI,
-nil,
-aA,
-aq,
-ar
-)
-
-function ar.LockAll(aB)
-
-for b,d in next,Window.AllElements do
-if d.Tab and d.Tab.Index and d.Tab.Index==ar.Index and d.Lock then
-d:Lock()
-end
-end
-end
-function ar.UnlockAll(aB)
-for b,d in next,Window.AllElements do
-if d.Tab and d.Tab.Index and d.Tab.Index==ar.Index and d.Unlock then
-d:Unlock()
-end
-end
-end
-function ar.GetLocked(aB)
-local b={}
-
-for d,f in next,Window.AllElements do
-if f.Tab and f.Tab.Index and f.Tab.Index==ar.Index and f.Locked==true then
-table.insert(b,f)
-end
-end
-
-return b
-end
-function ar.GetUnlocked(aB)
-local b={}
-
-for d,f in next,Window.AllElements do
-if f.Tab and f.Tab.Index and f.Tab.Index==ar.Index and f.Locked==false then
-table.insert(b,f)
-end
-end
-
-return b
-end
-
-function ar.Select(aB)
-return ao:SelectTab(ar.Index)
-end
-
-task.spawn(function()
-local aB
-if ar.CustomEmptyPage.Icon then
-aB=
-ak.Image(ar.CustomEmptyPage.Icon,ar.CustomEmptyPage.Icon,0,"Temp","EmptyPage",true)
-aB.Size=
-UDim2.fromOffset(ar.CustomEmptyPage.IconSize or 48,ar.CustomEmptyPage.IconSize or 48)
-end
-
-local b=al("Frame",{
-BackgroundTransparency=1,
-Size=UDim2.new(1,0,1,-Window.UIElements.Main.Main.Topbar.AbsoluteSize.Y),
-Parent=ar.UIElements.ContainerFrame,
-},{
-al("UIListLayout",{
-Padding=UDim.new(0,8),
-SortOrder="LayoutOrder",
-VerticalAlignment="Center",
-HorizontalAlignment="Center",
-FillDirection="Vertical",
-}),
-
-
-
-
-
-
-
-
-
-
-
-aB,
-ar.CustomEmptyPage.Title and al("TextLabel",{
-AutomaticSize="XY",
-Text=ar.CustomEmptyPage.Title,
-ThemeTag={
-TextColor3="Text",
-},
-TextSize=18,
-TextTransparency=0.5,
-BackgroundTransparency=1,
-FontFace=Font.new(ak.Font,Enum.FontWeight.Medium),
-})or nil,
-ar.CustomEmptyPage.Desc and al("TextLabel",{
-AutomaticSize="XY",
-Text=ar.CustomEmptyPage.Desc,
-ThemeTag={
-TextColor3="Text",
-},
-TextSize=15,
-TextTransparency=0.65,
-BackgroundTransparency=1,
-FontFace=Font.new(ak.Font,Enum.FontWeight.Regular),
-})or nil,
-})
-
-
-
-
-
-local d
-d=ak.AddSignal(ar.UIElements.ContainerFrame.ChildAdded,function()
-b.Visible=false
-d:Disconnect()
-end)
-end)
-
-return ar
-end
-
-function ao.OnChange(ap,aq)
-ao.OnChangeFunc=aq
-end
-
-function ao.SelectTab(ap,aq)
-if not ao.Tabs[aq].Locked then
-ao.SelectedTab=aq
-
-for ar,as in next,ao.Tabs do
-if not as.Locked then
-ak.SetThemeTag(as.UIElements.Main,{
-ImageTransparency="TabBorderTransparency",
-},0.15)
-if as.Border then
-ak.SetThemeTag(as.UIElements.Main.Outline,{
-ImageTransparency="TabBorderTransparency",
-},0.15)
-end
-ak.SetThemeTag(as.UIElements.Main.Frame.TextLabel,{
-TextTransparency="TabTextTransparency",
-},0.15)
-if as.UIElements.Icon and not as.IconColor then
-ak.SetThemeTag(as.UIElements.Icon.ImageLabel,{
-ImageTransparency="TabIconTransparency",
-},0.15)
-end
-as.Selected=false
-end
-end
-ak.SetThemeTag(ao.Tabs[aq].UIElements.Main,{
-ImageColor3="TabBackgroundActive",
-ImageTransparency="TabBackgroundActiveTransparency",
-},0.15)
-if ao.Tabs[aq].Border then
-ak.SetThemeTag(ao.Tabs[aq].UIElements.Main.Outline,{
-ImageTransparency="TabBorderTransparencyActive",
-},0.15)
-end
-ak.SetThemeTag(ao.Tabs[aq].UIElements.Main.Frame.TextLabel,{
-TextTransparency="TabTextTransparencyActive",
-},0.15)
-if ao.Tabs[aq].UIElements.Icon and not ao.Tabs[aq].IconColor then
-ak.SetThemeTag(ao.Tabs[aq].UIElements.Icon.ImageLabel,{
-ImageTransparency="TabIconTransparencyActive",
-},0.15)
-end
-ao.Tabs[aq].Selected=true
-
-task.spawn(function()
-for ar,as in next,ao.Containers do
-as.AnchorPoint=Vector2.new(0,0.05)
-as.Visible=false
-end
-ao.Containers[aq].Visible=true
-local ar=game:GetService"TweenService"
-
-local as=TweenInfo.new(0.15,Enum.EasingStyle.Quart,Enum.EasingDirection.Out)
-local at=ar:Create(ao.Containers[aq],as,{
-AnchorPoint=Vector2.new(0,0),
-})
-at:Play()
-end)
-
-ao.OnChangeFunc(aq)
-end
-end
-
-return ao end function a.ah()
+return TabModule
+end function a.ah()
 
 local aa={}
 
@@ -38736,6 +39011,10 @@ aw.AcrylicPaint.Model:Destroy()
 end
 
 aw.Destroyed=true
+
+if aw.TabModule and aw.TabModule.DestroyAll then
+aw.TabModule:DestroyAll()
+end
 
 task.wait(0.4)
 

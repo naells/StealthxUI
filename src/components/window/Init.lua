@@ -1516,6 +1516,10 @@ return function(Config)
 
 				Window.Destroyed = true
 
+				if Window.TabModule and Window.TabModule.DestroyAll then
+					Window.TabModule:DestroyAll()
+				end
+
 				task.wait(0.4)
 
 				Config.StealthxUI.ScreenGui:Destroy()

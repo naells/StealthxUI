@@ -15,6 +15,36 @@ local CreateScrollSlider = require("../ui/ScrollSlider").New
 
 local Window, StealthxUI, UIScale
 
+local function CleanupResource(Resource, CustomCleanup)
+	if Resource == nil then
+		return
+	end
+
+	pcall(function()
+		if typeof(CustomCleanup) == "function" then
+			CustomCleanup(Resource)
+		elseif typeof(Resource) == "RBXScriptConnection" then
+			Resource:Disconnect()
+		elseif typeof(Resource) == "Instance" then
+			Resource:Destroy()
+		elseif type(Resource) == "thread" then
+			task.cancel(Resource)
+		elseif typeof(Resource) == "function" then
+			Resource()
+		elseif type(Resource) == "table" then
+			if typeof(Resource.Destroy) == "function" then
+				Resource:Destroy()
+			elseif typeof(Resource.Disconnect) == "function" then
+				Resource:Disconnect()
+			elseif typeof(Resource.Cancel) == "function" then
+				Resource:Cancel()
+			elseif typeof(Resource.Close) == "function" then
+				Resource:Close()
+			end
+		end
+	end)
+end
+
 local TabModule = {
 	--Window = nil,
 	--StealthxUI = nil,
@@ -31,12 +61,20 @@ local TabModule = {
 function TabModule.Init(WindowTable, StealthxUITable, ToolTipParent, TabHighlight)
 	Window = WindowTable
 	StealthxUI = StealthxUITable
+	TabModule.Tabs = {}
+	TabModule.Containers = {}
+	TabModule.SelectedTab = nil
+	TabModule.TabCount = 0
 	TabModule.ToolTipParent = ToolTipParent
 	TabModule.TabHighlight = TabHighlight
+	TabModule.OnChangeFunc = function(v) end
 	return TabModule
 end
 
 function TabModule.New(Config, UIScale)
+	local BuildFunction = typeof(Config.Build) == "function" and Config.Build or nil
+	local Lazy = Config.Lazy == true and BuildFunction ~= nil
+
 	local Tab = {
 		__type = "Tab",
 		Title = Config.Title or "Tab",
@@ -52,11 +90,22 @@ function TabModule.New(Config, UIScale)
 			or { Icon = "lucide:frown", IconSize = 48, Title = "This tab is Empty", Desc = nil },
 		Border = Config.Border,
 		Selected = false,
+		Destroyed = false,
 		Index = nil,
 		Parent = Config.Parent,
 		UIElements = {},
 		Elements = {},
+		TrackedResources = {},
 		ContainerFrame = nil,
+		BuildFunction = BuildFunction,
+		Lazy = Lazy,
+		Built = BuildFunction == nil,
+		Building = false,
+		BuildFailed = false,
+		BuildError = nil,
+		BuildState = BuildFunction and "pending" or "built",
+		EmptyStateInitialized = false,
+		EmptyState = nil,
 		UICorner = Window.UICorner - (Window.UIPadding / 2),
 
 		Gap = Window.NewElements and 1 or 6,
@@ -65,6 +114,98 @@ function TabModule.New(Config, UIScale)
 		TabPaddingY = 3 + (Window.UIPadding / 2),
 		TitlePaddingY = 0,
 	}
+
+	function Tab:Track(Resource, Cleanup)
+		if Resource == nil then
+			return nil
+		end
+
+		table.insert(Tab.TrackedResources, {
+			Resource = Resource,
+			Cleanup = Cleanup,
+		})
+		return Resource
+	end
+
+	function Tab:TrackSignal(Signal, Callback)
+		if not Signal or typeof(Signal.Connect) ~= "function" then
+			return nil
+		end
+		return Tab:Track(Signal:Connect(Callback))
+	end
+
+	function Tab:OnCleanup(Callback)
+		if typeof(Callback) ~= "function" then
+			return nil
+		end
+		return Tab:Track(Callback, function(Resource)
+			Resource()
+		end)
+	end
+
+	function Tab:Cleanup()
+		for Index = #Tab.TrackedResources, 1, -1 do
+			local Entry = table.remove(Tab.TrackedResources, Index)
+			if Entry then
+				CleanupResource(Entry.Resource, Entry.Cleanup)
+			end
+		end
+		return Tab
+	end
+
+	function Tab:_EnsureBuilt()
+		if Tab.Destroyed then
+			return false, "destroyed"
+		end
+		if Tab.Built then
+			return true
+		end
+		if Tab.Building then
+			return false, "building"
+		end
+		if Tab.BuildFailed then
+			return false, Tab.BuildError
+		end
+		if not Tab.BuildFunction then
+			Tab.Built = true
+			Tab.BuildState = "built"
+			return true
+		end
+
+		Tab.Building = true
+		Tab.BuildState = "building"
+		local Success, ErrorMessage = pcall(Tab.BuildFunction, Tab)
+		Tab.Building = false
+
+		if not Success then
+			Tab.BuildFailed = true
+			Tab.BuildState = "failed"
+			Tab.BuildError = tostring(ErrorMessage)
+
+			-- A failed lazy build may have created a partial UI before the error.
+			-- Release those resources now instead of retaining a half-built tab.
+			Tab:Cleanup()
+			for Index = #Tab.Elements, 1, -1 do
+				local Element = Tab.Elements[Index]
+				if Element and Element.Destroy then
+					pcall(function() Element:Destroy() end)
+				end
+			end
+			Tab.Elements = {}
+
+			warn("[ StealthxUI ] Failed to build tab '" .. Tab.Title .. "': " .. Tab.BuildError)
+			return false, Tab.BuildError
+		end
+
+		Tab.Built = true
+		Tab.BuildState = "built"
+		Tab.BuildError = nil
+		return true
+	end
+
+	function Tab:Build()
+		return Tab:_EnsureBuilt()
+	end
 
 	-- if Tab.TabTitleAlign == "Left" then
 	-- 	Tab.TabTitleAlign = "Top"
@@ -78,6 +219,10 @@ function TabModule.New(Config, UIScale)
 		Tab.TabPaddingX = 2 + (Window.UIPadding / 4)
 		Tab.TabPaddingY = 2 + (Window.UIPadding / 4)
 		Tab.TitlePaddingY = 2 + (Window.UIPadding / 4)
+	end
+
+	if Config.Lazy == true and not BuildFunction and Window.Debug then
+		warn("[ StealthxUI ] Lazy tab '" .. Tab.Title .. "' has no Build callback; falling back to eager API usage.")
 	end
 
 	TabModule.TabCount = TabModule.TabCount + 1
@@ -347,7 +492,7 @@ function TabModule.New(Config, UIScale)
 
 	Tab.ContainerFrame = Tab.UIElements.ContainerFrameCanvas
 
-	Creator.AddSignal(Tab.UIElements.Main.MouseButton1Click, function()
+	Tab:TrackSignal(Tab.UIElements.Main.MouseButton1Click, function()
 		if not Tab.Locked then
 			TabModule:SelectTab(TabIndex)
 		end
@@ -370,7 +515,7 @@ function TabModule.New(Config, UIScale)
 
 	-- ToolTip
 	if Tab.Desc then
-		Creator.AddSignal(Tab.UIElements.Main.InputBegan, function()
+		Tab:TrackSignal(Tab.UIElements.Main.InputBegan, function()
 			IsHovering = true
 			hoverTimer = task.spawn(function()
 				task.wait(0.35)
@@ -386,13 +531,14 @@ function TabModule.New(Config, UIScale)
 
 					updatePosition()
 					MouseConn = Mouse.Move:Connect(updatePosition)
+					Tab._TooltipMouseConn = MouseConn
 					ToolTip:Open()
 				end
 			end)
 		end)
 	end
 
-	Creator.AddSignal(Tab.UIElements.Main.MouseEnter, function()
+	Tab:TrackSignal(Tab.UIElements.Main.MouseEnter, function()
 		if not Tab.Locked then
 			Creator.SetThemeTag(Tab.UIElements.Main.Frame, {
 				ImageTransparency = "TabBackgroundHoverTransparency",
@@ -400,7 +546,7 @@ function TabModule.New(Config, UIScale)
 			}, 0.1)
 		end
 	end)
-	Creator.AddSignal(Tab.UIElements.Main.InputEnded, function()
+	Tab:TrackSignal(Tab.UIElements.Main.InputEnded, function()
 		if Tab.Desc then
 			IsHovering = false
 			if hoverTimer then
@@ -425,12 +571,21 @@ function TabModule.New(Config, UIScale)
 	end)
 
 	function Tab:ScrollToTheElement(elemindex)
+		if not Tab.Built then
+			Tab:_EnsureBuilt()
+		end
+
+		local Target = Tab.Elements[elemindex]
+		if not Target or not Target.ElementFrame then
+			return Tab
+		end
+
 		Tab.UIElements.ContainerFrame.ScrollingEnabled = false
 
 		Creator.Tween(Tab.UIElements.ContainerFrame, 0.45, {
 			CanvasPosition = Vector2.new(
 				0,
-				Tab.Elements[elemindex].ElementFrame.AbsolutePosition.Y
+				Target.ElementFrame.AbsolutePosition.Y
 					- Tab.UIElements.ContainerFrame.AbsolutePosition.Y
 					- Tab.UIElements.ContainerFrame.UIPadding.PaddingTop.Offset
 			),
@@ -439,8 +594,8 @@ function TabModule.New(Config, UIScale)
 		task.spawn(function()
 			task.wait(0.48)
 
-			if Tab.Elements[elemindex].Highlight then
-				Tab.Elements[elemindex]:Highlight()
+			if Target.Highlight then
+				Target:Highlight()
 			end
 			Tab.UIElements.ContainerFrame.ScrollingEnabled = true
 		end)
@@ -463,6 +618,77 @@ function TabModule.New(Config, UIScale)
 		UIScale,
 		Tab
 	)
+
+	if Tab.BuildFunction and not Tab.Lazy then
+		Tab:_EnsureBuilt()
+	end
+
+	function Tab:GetElement(Id)
+		local Element = Window.GetElement and Window:GetElement(Id) or nil
+		if Element and Element.Tab == Tab then
+			return Element
+		end
+		return nil
+	end
+
+	function Tab:_EnsureEmptyState()
+		if Tab.Destroyed or Tab.EmptyStateInitialized or #Tab.Elements > 0 then
+			return Tab.EmptyState
+		end
+
+		Tab.EmptyStateInitialized = true
+		local EmptyPageIcon
+		if Tab.CustomEmptyPage.Icon then
+			EmptyPageIcon = Creator.Image(Tab.CustomEmptyPage.Icon, Tab.CustomEmptyPage.Icon, 0, "Temp", "EmptyPage", true)
+			EmptyPageIcon.Size = UDim2.fromOffset(Tab.CustomEmptyPage.IconSize or 48, Tab.CustomEmptyPage.IconSize or 48)
+		end
+
+		local Empty = New("Frame", {
+			BackgroundTransparency = 1,
+			Size = UDim2.new(1, 0, 1, -Window.UIElements.Main.Main.Topbar.AbsoluteSize.Y),
+			Parent = Tab.UIElements.ContainerFrame,
+		}, {
+			New("UIListLayout", {
+				Padding = UDim.new(0, 8),
+				SortOrder = "LayoutOrder",
+				VerticalAlignment = "Center",
+				HorizontalAlignment = "Center",
+				FillDirection = "Vertical",
+			}),
+			EmptyPageIcon,
+			Tab.CustomEmptyPage.Title and New("TextLabel", {
+				AutomaticSize = "XY",
+				Text = Tab.CustomEmptyPage.Title,
+				ThemeTag = { TextColor3 = "Text" },
+				TextSize = 18,
+				TextTransparency = 0.5,
+				BackgroundTransparency = 1,
+				FontFace = Font.new(Creator.Font, Enum.FontWeight.Medium),
+			}) or nil,
+			Tab.CustomEmptyPage.Desc and New("TextLabel", {
+				AutomaticSize = "XY",
+				Text = Tab.CustomEmptyPage.Desc,
+				ThemeTag = { TextColor3 = "Text" },
+				TextSize = 15,
+				TextTransparency = 0.65,
+				BackgroundTransparency = 1,
+				FontFace = Font.new(Creator.Font, Enum.FontWeight.Regular),
+			}) or nil,
+		})
+
+		Tab.EmptyState = Empty
+		local CreationConn
+		CreationConn = Tab:TrackSignal(Tab.UIElements.ContainerFrame.ChildAdded, function()
+			if Empty.Parent then
+				Empty.Visible = false
+			end
+			if CreationConn then
+				CreationConn:Disconnect()
+				CreationConn = nil
+			end
+		end)
+		return Empty
+	end
 
 	function Tab:LockAll()
 		--print("LockAll called, number of elements: " .. #self.Elements)
@@ -506,73 +732,49 @@ function TabModule.New(Config, UIScale)
 		return TabModule:SelectTab(Tab.Index)
 	end
 
-	task.spawn(function()
-		local EmptyPageIcon
-		if Tab.CustomEmptyPage.Icon then
-			EmptyPageIcon =
-				Creator.Image(Tab.CustomEmptyPage.Icon, Tab.CustomEmptyPage.Icon, 0, "Temp", "EmptyPage", true)
-			EmptyPageIcon.Size =
-				UDim2.fromOffset(Tab.CustomEmptyPage.IconSize or 48, Tab.CustomEmptyPage.IconSize or 48)
+	function Tab:Destroy(SuppressSelect)
+		if Tab.Destroyed then
+			return Tab
 		end
 
-		local Empty = New("Frame", {
-			BackgroundTransparency = 1,
-			Size = UDim2.new(1, 0, 1, -Window.UIElements.Main.Main.Topbar.AbsoluteSize.Y),
-			Parent = Tab.UIElements.ContainerFrame,
-		}, {
-			New("UIListLayout", {
-				Padding = UDim.new(0, 8),
-				SortOrder = "LayoutOrder",
-				VerticalAlignment = "Center",
-				HorizontalAlignment = "Center",
-				FillDirection = "Vertical",
-			}),
-			-- New("ImageLabel", {
-			-- 	Size = UDim2.new(0, 48, 0, 48),
-			-- 	Image = Creator.Icon("frown")[1],
-			-- 	ImageRectOffset = Creator.Icon("frown")[2].ImageRectPosition,
-			-- 	ImageRectSize = Creator.Icon("frown")[2].ImageRectSize,
-			-- 	ThemeTag = {
-			-- 		ImageColor3 = "Icon",
-			-- 	},
-			-- 	BackgroundTransparency = 1,
-			-- 	ImageTransparency = 0.6,
-			-- }),
-			EmptyPageIcon,
-			Tab.CustomEmptyPage.Title and New("TextLabel", { -- Title
-				AutomaticSize = "XY",
-				Text = Tab.CustomEmptyPage.Title,
-				ThemeTag = {
-					TextColor3 = "Text",
-				},
-				TextSize = 18,
-				TextTransparency = 0.5,
-				BackgroundTransparency = 1,
-				FontFace = Font.new(Creator.Font, Enum.FontWeight.Medium),
-			}) or nil,
-			Tab.CustomEmptyPage.Desc and New("TextLabel", { -- Desc
-				AutomaticSize = "XY",
-				Text = Tab.CustomEmptyPage.Desc,
-				ThemeTag = {
-					TextColor3 = "Text",
-				},
-				TextSize = 15,
-				TextTransparency = 0.65,
-				BackgroundTransparency = 1,
-				FontFace = Font.new(Creator.Font, Enum.FontWeight.Regular),
-			}) or nil,
-		})
+		Tab.Destroyed = true
+		if Tab._TooltipMouseConn then
+			CleanupResource(Tab._TooltipMouseConn)
+			Tab._TooltipMouseConn = nil
+		end
+		Tab:Cleanup()
 
-		-- Empty.TextLabel:GetPropertyChangedSignal("TextBounds"):Connect(function()
-		--     Empty.TextLabel.Size = UDim2.new(0,Empty.TextLabel.TextBounds.X,0,Empty.TextLabel.TextBounds.Y)
-		-- end)
+		for Index = #Tab.Elements, 1, -1 do
+			local Element = Tab.Elements[Index]
+			if Element and Element.Destroy then
+				pcall(function() Element:Destroy() end)
+			end
+		end
+		Tab.Elements = {}
 
-		local CreationConn
-		CreationConn = Creator.AddSignal(Tab.UIElements.ContainerFrame.ChildAdded, function()
-			Empty.Visible = false
-			CreationConn:Disconnect()
-		end)
-	end)
+		if Tab.UIElements.ContainerFrameCanvas then
+			Tab.UIElements.ContainerFrameCanvas:Destroy()
+		end
+		if Tab.UIElements.Main then
+			Tab.UIElements.Main:Destroy()
+		end
+
+		local TabIndex = Tab.Index
+		TabModule.Tabs[TabIndex] = nil
+		TabModule.Containers[TabIndex] = nil
+
+		if not SuppressSelect and TabModule.SelectedTab == TabIndex then
+			TabModule.SelectedTab = nil
+			for Index, Candidate in next, TabModule.Tabs do
+				if Candidate and not Candidate.Destroyed and not Candidate.Locked then
+					TabModule:SelectTab(Index)
+					break
+				end
+			end
+		end
+
+		return Tab
+	end
 
 	return Tab
 end
@@ -582,66 +784,100 @@ function TabModule:OnChange(func)
 end
 
 function TabModule:SelectTab(TabIndex)
-	if not TabModule.Tabs[TabIndex].Locked then
-		TabModule.SelectedTab = TabIndex
+	local SelectedTab = TabModule.Tabs[TabIndex]
+	if not SelectedTab or SelectedTab.Destroyed or SelectedTab.Locked then
+		return nil
+	end
 
-		for _, TabObject in next, TabModule.Tabs do
-			if not TabObject.Locked then
-				Creator.SetThemeTag(TabObject.UIElements.Main, {
-					ImageTransparency = "TabBorderTransparency",
-				}, 0.15)
-				if TabObject.Border then
-					Creator.SetThemeTag(TabObject.UIElements.Main.Outline, {
-						ImageTransparency = "TabBorderTransparency",
-					}, 0.15)
-				end
-				Creator.SetThemeTag(TabObject.UIElements.Main.Frame.TextLabel, {
-					TextTransparency = "TabTextTransparency",
-				}, 0.15)
-				if TabObject.UIElements.Icon and not TabObject.IconColor then
-					Creator.SetThemeTag(TabObject.UIElements.Icon.ImageLabel, {
-						ImageTransparency = "TabIconTransparency",
-					}, 0.15)
-				end
-				TabObject.Selected = false
+	local AlreadySelected = TabModule.SelectedTab == TabIndex and SelectedTab.Built
+	local BuiltSuccessfully = true
+	if not SelectedTab.Built then
+		BuiltSuccessfully = SelectedTab:_EnsureBuilt()
+	end
+	if SelectedTab.BuildFailed then
+		BuiltSuccessfully = false
+	end
+
+	TabModule.SelectedTab = TabIndex
+
+	for _, TabObject in next, TabModule.Tabs do
+		if TabObject and not TabObject.Destroyed and not TabObject.Locked then
+			Creator.SetThemeTag(TabObject.UIElements.Main, { ImageTransparency = "TabBorderTransparency" }, 0.15)
+			if TabObject.Border then
+				Creator.SetThemeTag(TabObject.UIElements.Main.Outline, { ImageTransparency = "TabBorderTransparency" }, 0.15)
 			end
+			Creator.SetThemeTag(TabObject.UIElements.Main.Frame.TextLabel, { TextTransparency = "TabTextTransparency" }, 0.15)
+			if TabObject.UIElements.Icon and not TabObject.IconColor then
+				Creator.SetThemeTag(TabObject.UIElements.Icon.ImageLabel, { ImageTransparency = "TabIconTransparency" }, 0.15)
+			end
+			TabObject.Selected = false
 		end
-		Creator.SetThemeTag(TabModule.Tabs[TabIndex].UIElements.Main, {
-			ImageColor3 = "TabBackgroundActive",
-			ImageTransparency = "TabBackgroundActiveTransparency",
-		}, 0.15)
-		if TabModule.Tabs[TabIndex].Border then
-			Creator.SetThemeTag(TabModule.Tabs[TabIndex].UIElements.Main.Outline, {
-				ImageTransparency = "TabBorderTransparencyActive",
-			}, 0.15)
-		end
-		Creator.SetThemeTag(TabModule.Tabs[TabIndex].UIElements.Main.Frame.TextLabel, {
-			TextTransparency = "TabTextTransparencyActive",
-		}, 0.15)
-		if TabModule.Tabs[TabIndex].UIElements.Icon and not TabModule.Tabs[TabIndex].IconColor then
-			Creator.SetThemeTag(TabModule.Tabs[TabIndex].UIElements.Icon.ImageLabel, {
-				ImageTransparency = "TabIconTransparencyActive",
-			}, 0.15)
-		end
-		TabModule.Tabs[TabIndex].Selected = true
+	end
 
-		task.spawn(function()
-			for _, ContainerObject in next, TabModule.Containers do
+	Creator.SetThemeTag(SelectedTab.UIElements.Main, {
+		ImageColor3 = "TabBackgroundActive",
+		ImageTransparency = "TabBackgroundActiveTransparency",
+	}, 0.15)
+	if SelectedTab.Border then
+		Creator.SetThemeTag(SelectedTab.UIElements.Main.Outline, { ImageTransparency = "TabBorderTransparencyActive" }, 0.15)
+	end
+	Creator.SetThemeTag(SelectedTab.UIElements.Main.Frame.TextLabel, { TextTransparency = "TabTextTransparencyActive" }, 0.15)
+	if SelectedTab.UIElements.Icon and not SelectedTab.IconColor then
+		Creator.SetThemeTag(SelectedTab.UIElements.Icon.ImageLabel, { ImageTransparency = "TabIconTransparencyActive" }, 0.15)
+	end
+	SelectedTab.Selected = true
+
+	if not AlreadySelected then
+		for _, ContainerObject in next, TabModule.Containers do
+			if ContainerObject then
 				ContainerObject.AnchorPoint = Vector2.new(0, 0.05)
 				ContainerObject.Visible = false
 			end
-			TabModule.Containers[TabIndex].Visible = true
+		end
+
+		local Container = TabModule.Containers[TabIndex]
+		if Container then
+			Container.Visible = true
 			local TweenService = game:GetService("TweenService")
-
-			local tweenInfo = TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-			local tween = TweenService:Create(TabModule.Containers[TabIndex], tweenInfo, {
-				AnchorPoint = Vector2.new(0, 0),
-			})
-			tween:Play()
-		end)
-
-		TabModule.OnChangeFunc(TabIndex)
+			TweenService:Create(
+				Container,
+				TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+				{ AnchorPoint = Vector2.new(0, 0) }
+			):Play()
+		end
 	end
+
+	if #SelectedTab.Elements == 0 then
+		SelectedTab:_EnsureEmptyState()
+	elseif SelectedTab.EmptyState then
+		SelectedTab.EmptyState.Visible = false
+	end
+
+	if not BuiltSuccessfully and SelectedTab.BuildError and Window.Debug then
+		warn("[ StealthxUI: DEBUG Mode ] Tab '" .. SelectedTab.Title .. "' is using a partial/failed build: " .. SelectedTab.BuildError)
+	end
+
+	TabModule.OnChangeFunc(TabIndex)
+	return SelectedTab
+end
+
+function TabModule:DestroyAll()
+	local Tabs = {}
+	for _, Tab in next, TabModule.Tabs do
+		table.insert(Tabs, Tab)
+	end
+
+	for Index = #Tabs, 1, -1 do
+		local Tab = Tabs[Index]
+		if Tab and Tab.Destroy then
+			Tab:Destroy(true)
+		end
+	end
+
+	TabModule.Tabs = {}
+	TabModule.Containers = {}
+	TabModule.SelectedTab = nil
+	TabModule.TabCount = 0
 end
 
 return TabModule

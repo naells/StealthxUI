@@ -27,7 +27,8 @@ return {
 				config.ParentType = tbl.__type
 				config.ParentTable = tbl
 				config.Index = #tbl.Elements + 1
-				config.GlobalIndex = #Window.AllElements + 1
+				Window._NextElementId = (Window._NextElementId or 0) + 1
+				config.GlobalIndex = Window._NextElementId
 				config.Parent = Container
 				config.Window = Window
 				config.StealthxUI = StealthxUI
@@ -97,14 +98,15 @@ return {
 					function content:Destroy()
 						frame:Destroy()
 
-						table.remove(Window.AllElements, config.GlobalIndex)
+						Window.AllElements[config.GlobalIndex] = nil
 						table.remove(tbl.Elements, config.Index)
 						table.remove(Tab.Elements, config.Index)
 						tbl:UpdateAllElementShapes(tbl)
 					end
 				end
 
-				Window.AllElements[config.Index] = content
+				Window.AllElements[config.GlobalIndex] = content
+				content._GlobalIndex = config.GlobalIndex
 				tbl.Elements[config.Index] = content
 				if Tab then
 					Tab.Elements[config.Index] = content

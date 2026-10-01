@@ -143,9 +143,14 @@ function Creator.AddSignal(Signal, Function)
 end
 
 function Creator.DisconnectAll()
-	for idx, signal in next, Creator.Signals do
-		local Connection = table.remove(Creator.Signals, idx)
-		Connection:Disconnect()
+	for idx = #Creator.Signals, 1, -1 do
+		local Connection = Creator.Signals[idx]
+		Creator.Signals[idx] = nil
+		if Connection then
+			pcall(function()
+				Connection:Disconnect()
+			end)
+		end
 	end
 end
 

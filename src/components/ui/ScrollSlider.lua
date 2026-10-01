@@ -39,6 +39,39 @@ function ScrollSlider.New(ScrollingFrame, Parent, Window, Thickness, StealthxUI)
 	local ScrollSliderActionId = Creator:GenerateUniqueID()
 	local isDragging = false
 	local connectionMove, connectionEnd
+	local Connections = {}
+
+	local function TrackConnection(Connection)
+		if Connection then
+			table.insert(Connections, Connection)
+		end
+		return Connection
+	end
+
+	local function DisconnectDragConnections()
+		if connectionMove then
+			connectionMove:Disconnect()
+			connectionMove = nil
+		end
+		if connectionEnd then
+			connectionEnd:Disconnect()
+			connectionEnd = nil
+		end
+		isDragging = false
+	end
+
+	local function DisconnectTrackedConnections()
+		DisconnectDragConnections()
+		for Index = #Connections, 1, -1 do
+			local Connection = table.remove(Connections, Index)
+			if Connection then
+				pcall(function() Connection:Disconnect() end)
+			end
+		end
+		if StealthxUI.CurrentInput == ScrollSliderActionId then
+			StealthxUI.CurrentInput = nil
+		end
+	end
 
 	local function UpdateVisuals()
 		local canvasY = ScrollingFrame.AbsoluteCanvasSize.Y
@@ -66,20 +99,14 @@ function ScrollSlider.New(ScrollingFrame, Parent, Window, Thickness, StealthxUI)
 	end
 
 	local function StopDrag()
+		ScrollingFrame.ScrollingEnabled = true
+		DisconnectDragConnections()
 		if StealthxUI.CurrentInput == ScrollSliderActionId then
 			StealthxUI.CurrentInput = nil
 		end
-		isDragging = false
-		ScrollingFrame.ScrollingEnabled = true
-		if connectionMove then
-			connectionMove:Disconnect()
-		end
-		if connectionEnd then
-			connectionEnd:Disconnect()
-		end
 	end
 
-	Creator.AddSignal(Hitbox.InputBegan, function(input)
+	TrackConnection(Hitbox.InputBegan:Connect(function(input)
 		if
 			input.UserInputType ~= Enum.UserInputType.MouseButton1
 			and input.UserInputType ~= Enum.UserInputType.Touch
@@ -134,11 +161,16 @@ function ScrollSlider.New(ScrollingFrame, Parent, Window, Thickness, StealthxUI)
 				StopDrag()
 			end
 		end)
-	end)
+	end))
 
-	Creator.AddSignal(ScrollingFrame:GetPropertyChangedSignal("AbsoluteWindowSize"), UpdateVisuals)
-	Creator.AddSignal(ScrollingFrame:GetPropertyChangedSignal("AbsoluteCanvasSize"), UpdateVisuals)
-	Creator.AddSignal(ScrollingFrame:GetPropertyChangedSignal("CanvasPosition"), UpdateVisuals)
+	TrackConnection(ScrollingFrame:GetPropertyChangedSignal("AbsoluteWindowSize"):Connect(UpdateVisuals))
+	TrackConnection(ScrollingFrame:GetPropertyChangedSignal("AbsoluteCanvasSize"):Connect(UpdateVisuals))
+	TrackConnection(ScrollingFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(UpdateVisuals))
+
+	Slider.Destroying:Connect(function()
+		ScrollingFrame.ScrollingEnabled = true
+		DisconnectTrackedConnections()
+	end)
 
 	UpdateVisuals()
 
