@@ -416,6 +416,7 @@ function StealthxUI:CreateWindow(Config)
 
 	StealthxUI.Transparent = Config.Transparent
 	StealthxUI.Window = Window
+	StealthxUI.ConfigManager = Window.ConfigManager
 
 	if Config.Acrylic then
 		Acrylic.init()

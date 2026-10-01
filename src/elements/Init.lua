@@ -38,35 +38,27 @@ return {
 				local _elementInstance, content = module:New(config)
 
 				if config.Flag and typeof(config.Flag) == "string" then
+					Window.ConfigElements = Window.ConfigElements or {}
+					Window.PendingFlags = Window.ConfigElements
+					Window.ConfigElements[config.Flag] = content
+
 					if Window.CurrentConfig then
 						Window.CurrentConfig:Register(config.Flag, content)
+					end
 
-						if Window.PendingConfigData and Window.PendingConfigData[config.Flag] then
-							local data = Window.PendingConfigData[config.Flag]
-
-							local ConfigManager = Window.ConfigManager
-							if ConfigManager.Parser[data.__type] then
-								task.defer(function()
-									local success, err = pcall(function()
-										ConfigManager.Parser[data.__type].Load(content, data)
-									end)
-
-									if success then
-										Window.PendingConfigData[config.Flag] = nil
-									else
-										warn(
-											"[ StealthxUI ] Failed to apply pending config for '"
-												.. config.Flag
-												.. "': "
-												.. tostring(err)
-										)
-									end
-								end)
-							end
+					local pendingData = Window.PendingConfigData and Window.PendingConfigData[config.Flag]
+					local ConfigManager = Window.ConfigManager
+					local parser = pendingData and ConfigManager and ConfigManager.Parser[pendingData.__type]
+					if parser and content.__type == pendingData.__type then
+						local success, applied = pcall(parser.Load, content, pendingData)
+						if success and applied ~= false then
+							Window.PendingConfigData[config.Flag] = nil
+						else
+							warn("[ StealthxUI.ConfigManager ] Failed to apply pending config for '" .. config.Flag .. "'")
 						end
-					else
-						Window.PendingFlags = Window.PendingFlags or {}
-						Window.PendingFlags[config.Flag] = content
+					elseif pendingData and content.__type ~= pendingData.__type then
+						Window.PendingConfigData[config.Flag] = nil
+						warn("[ StealthxUI.ConfigManager ] Ignored incompatible saved type for '" .. config.Flag .. "'")
 					end
 				end
 
@@ -99,8 +91,16 @@ return {
 						frame:Destroy()
 
 						Window.AllElements[config.GlobalIndex] = nil
+						if Window.ConfigManager and Window.ConfigManager.UnregisterElement then
+							Window.ConfigManager:UnregisterElement(config.Flag, content)
+						end
+						if config.Flag and Window.ConfigElements and Window.ConfigElements[config.Flag] == content then
+							Window.ConfigElements[config.Flag] = nil
+						end
 						table.remove(tbl.Elements, config.Index)
-						table.remove(Tab.Elements, config.Index)
+						if Tab and Tab.Elements[config.Index] == content then
+							table.remove(Tab.Elements, config.Index)
+						end
 						tbl:UpdateAllElementShapes(tbl)
 					end
 				end

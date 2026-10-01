@@ -1089,8 +1089,8 @@ if not RunService:IsStudio() and writefile and printidentity() then
 			Icon = "",
 			Justify = "Center",
 			Callback = function()
-				Window.CurrentConfig = ConfigManager:Config(ConfigName)
-				if Window.CurrentConfig:Save() then
+				Window.CurrentConfig = Window:Config(ConfigName)
+				if Window.CurrentConfig and Window.CurrentConfig.Save and Window.CurrentConfig:Save() then
 					StealthxUI:Notify({
 						Title = "Config Saved",
 						Desc = "Config '" .. ConfigName .. "' saved",
@@ -1109,8 +1109,8 @@ if not RunService:IsStudio() and writefile and printidentity() then
 			Icon = "",
 			Justify = "Center",
 			Callback = function()
-				Window.CurrentConfig = ConfigManager:CreateConfig(ConfigName)
-				if Window.CurrentConfig:Load() then
+				Window.CurrentConfig = Window:Config(ConfigName)
+				if Window.CurrentConfig and Window.CurrentConfig:Load() then
 					StealthxUI:Notify({
 						Title = "Config Loaded",
 						Desc = "Config '" .. ConfigName .. "' loaded",
@@ -1127,7 +1127,7 @@ if not RunService:IsStudio() and writefile and printidentity() then
 			Icon = "",
 			Justify = "Center",
 			Callback = function()
-				print(HttpService:JSONDecode(ConfigManager:GetAutoLoadConfigs()))
+				print(table.concat(ConfigManager:GetAutoLoadConfigs(), ", "))
 			end,
 		})
 	end

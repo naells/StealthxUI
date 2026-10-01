@@ -97,6 +97,8 @@ return function(Config)
 		ElementConfig = {},
 
 		PendingFlags = {},
+		ConfigElements = {},
+		PendingConfigData = {},
 
 		IsToggleDragging = false,
 	}
@@ -1527,6 +1529,10 @@ return function(Config)
 				Config.StealthxUI.DropdownGui:Destroy()
 				Config.StealthxUI.TooltipGui:Destroy()
 
+				if Window.ConfigManager and Window.ConfigManager.Destroy then
+					Window.ConfigManager:Destroy()
+				end
+
 				Creator.DisconnectAll()
 
 				return
@@ -1616,6 +1622,37 @@ return function(Config)
 
 	function Window:SetCurrentConfig(ConfigModule)
 		Window.CurrentConfig = ConfigModule
+		Window.PendingConfigData = ConfigModule and (ConfigModule.PendingData or {}) or {}
+		if ConfigModule and Window.ConfigManager and Window.ConfigManager.SyncElements then
+			Window.ConfigManager:SyncElements(ConfigModule)
+		end
+		return ConfigModule
+	end
+
+	function Window:Config(ConfigOptions, AutoLoad)
+		local Manager = Window.ConfigManager
+		if not Manager then
+			return false, "Config system is unavailable; set Window.Folder first."
+		end
+
+		local FileName
+		local ShouldAutoLoad = AutoLoad
+		if type(ConfigOptions) == "table" then
+			FileName = ConfigOptions.Name or ConfigOptions.ConfigName or ConfigOptions.FileName
+			if ConfigOptions.AutoLoad ~= nil then
+				ShouldAutoLoad = ConfigOptions.AutoLoad
+			end
+			if ConfigOptions.Path then
+				local ok, err = Manager:SetPath(ConfigOptions.Path)
+				if not ok then
+					return false, err
+				end
+			end
+		else
+			FileName = ConfigOptions
+		end
+
+		return Manager:CreateConfig(FileName, ShouldAutoLoad)
 	end
 
 	do
