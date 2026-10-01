@@ -10462,7 +10462,7 @@ return {
 							Window.ConfigElements[config.Flag] = nil
 						end
 						table.remove(tbl.Elements, config.Index)
-						if Tab and Tab.Elements[config.Index] == content then
+						if Tab and Tab == tbl and Tab.Elements[config.Index] == content then
 							table.remove(Tab.Elements, config.Index)
 						end
 						tbl:UpdateAllElementShapes(tbl)
@@ -10472,7 +10472,7 @@ return {
 				Window.AllElements[config.GlobalIndex] = content
 				content._GlobalIndex = config.GlobalIndex
 				tbl.Elements[config.Index] = content
-				if Tab then
+				if Tab and Tab == tbl then
 					Tab.Elements[config.Index] = content
 				end
 
@@ -13254,6 +13254,7 @@ function Element:New(Config)
 	function Section:Open(IsNotAnim)
 		if Section.Expandable then
 			Section.Opened = true
+			Main.Outline.Content.Visible = true
 			if IsNotAnim then
 				Main.Size = UDim2.new(
 					Main.Size.X.Scale,
@@ -13289,6 +13290,7 @@ function Element:New(Config)
 	function Section:Close(IsNotAnim)
 		if Section.Expandable then
 			Section.Opened = false
+			Main.Outline.Content.Visible = false
 			if IsNotAnim then
 				Main.Size = UDim2.new(
 					Main.Size.X.Scale,
@@ -13337,25 +13339,34 @@ function Element:New(Config)
 
 	task.defer(function()
 		if Section.Expandable then
-			-- New("UIPadding", {
-			--     PaddingTop = UDim.new(0,4),
-			--     PaddingLeft = UDim.new(0,Section.Padding),
-			--     PaddingRight = UDim.new(0,Section.Padding),
-			--     PaddingBottom = UDim.new(0,2),
-
-			--     Parent = Main.Top,
-			-- })
-			Main.Size =
-				UDim2.new(Main.Size.X.Scale, Main.Size.X.Offset, 0, Main.Outline.Top.AbsoluteSize.Y / Config.UIScale)
+			Main.Size = UDim2.new(
+				Main.Size.X.Scale,
+				Main.Size.X.Offset,
+				0,
+				Main.Outline.Top.AbsoluteSize.Y / Config.UIScale
+			)
 			Main.AutomaticSize = "None"
 			Main.Outline.Top.Size = UDim2.new(1, 0, 0, (not DescFrame and Section.HeaderSize or 0))
 			Main.Outline.Top.AutomaticSize = (not Section.Expandable or DescFrame) and "Y" or "None"
-			Main.Outline.Content.Visible = true
+			Main.Outline.Content.Visible = Section.Opened
 		end
+
 		if Section.Opened then
-			Section:Open()
+			Section:Open(true)
 		else
 			Section:Close(true)
+		end
+
+		if Section.Opened then
+			task.spawn(function()
+				for _ = 1, 4 do
+					task.wait()
+					if not Section.Opened or not Main.Parent then
+						return
+					end
+					Section:Open(true)
+				end
+			end)
 		end
 	end)
 

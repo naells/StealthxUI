@@ -98,7 +98,7 @@ return {
 							Window.ConfigElements[config.Flag] = nil
 						end
 						table.remove(tbl.Elements, config.Index)
-						if Tab and Tab.Elements[config.Index] == content then
+						if Tab and Tab == tbl and Tab.Elements[config.Index] == content then
 							table.remove(Tab.Elements, config.Index)
 						end
 						tbl:UpdateAllElementShapes(tbl)
@@ -108,7 +108,7 @@ return {
 				Window.AllElements[config.GlobalIndex] = content
 				content._GlobalIndex = config.GlobalIndex
 				tbl.Elements[config.Index] = content
-				if Tab then
+				if Tab and Tab == tbl then
 					Tab.Elements[config.Index] = content
 				end
 
